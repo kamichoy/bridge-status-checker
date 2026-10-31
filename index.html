@@ -83,15 +83,15 @@
   <div class="panel">
     <h3>2. iTAP verification file (CSV)</h3>
     <div class="row">
-      <button class="btn" onclick="document.getElementById('csvInput').click()">⬆️ Load iTAP CSV</button>
-      <input type="file" id="csvInput" accept=".csv,text/csv" style="display:none" onchange="App.loadCsvFile(this.files[0]); this.value='';">
+      <button class="btn" onclick="document.getElementById('csvInput').click()">⬆️ Load iTAP file</button>
+      <input type="file" id="csvInput" accept=".csv,.xlsx,.xls,text/csv" style="display:none" onchange="App.loadCsvFile(this.files[0]); this.value='';">
       <button class="btn" id="btnWorksheet" onclick="App.downloadWorksheet()" disabled>⬇️ Download iTAP worksheet</button>
       <span class="status-line" id="csvStatus">No iTAP file loaded.</span>
     </div>
     <div class="hint">
       The Select/Non-Select layers don't record demolitions, so the iTAP result for each bridge is kept in a CSV you maintain in Excel.
       <b>Download iTAP worksheet</b> gives you every INDOT bridge with what SHAARD currently says, plus any iTAP entries already loaded.
-      Fill in the <b>iTAP Status</b> column (<i>Demolished</i> or <i>Standing</i>; iTAP's own <i>Nonextant</i> / <i>Extant</i> wording also works), save as CSV, and load it back here. You can also load iTAP's <b>Search Results</b> export directly after saving it as CSV in Excel.
+      Fill in the <b>iTAP Status</b> column (<i>Demolished</i> or <i>Standing</i>; iTAP's own <i>Nonextant</i> / <i>Extant</i> wording also works), save as CSV, and load it back here. You can also load iTAP's <b>Search Results</b> export (.xlsx) directly, no conversion needed.
       Only the NBI, iTAP Status, Checked On, Checked By and Note columns are read; other columns are ignored.
     </div>
   </div>
@@ -161,7 +161,9 @@ const CONFIG = {
   idMatchFarMeters: 500,
   // When this page is hosted on a website, a CSV with this name sitting next to it is
   // loaded automatically. Opened from a local folder, use the Load button instead.
-  autoLoadCsv: 'itap_verified.csv'
+  autoLoadCsv: 'itap_verified.csv',
+  // Excel reader, loaded only when an .xlsx is picked.
+  sheetJsUrl: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
 };
 
 // =====================================================================
@@ -247,17 +249,28 @@ const H = {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
-  // Small RFC-4180 CSV reader (quoted fields, embedded commas/newlines, BOM).
+  loadScript(src, ready) {
+    if (ready()) return Promise.resolve();
+    return new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = () => res(); s.onerror = () => rej(new Error('could not load the Excel reader (needs internet)'));
+      document.head.appendChild(s);
+    });
+  },
+  // Small RFC-4180 CSV reader (quoted fields, embedded newlines, BOM). Also copes with
+  // semicolon- or tab-separated files, picked from whichever appears most in line 1.
   parseCsv(text) {
-    text = text.replace(/^﻿/, '');
+    text = text.replace(/^\uFEFF/, '');
+    const line1 = text.slice(0, text.search(/\r?\n/) >>> 0);
+    const sep = [',', ';', '\t'].map(c => [c, line1.split(c).length]).sort((a, b) => b[1] - a[1])[0][0];
     const rows = []; let row = [], cell = '', q = false;
     for (let i = 0; i < text.length; i++) {
       const c = text[i];
       if (q) {
         if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
         else cell += c;
-      } else if (c === '"') q = true;
-      else if (c === ',') { row.push(cell); cell = ''; }
+      } else if (c === '"' && cell === '') q = true;   // a quote mid-cell (18'2") is just text
+      else if (c === sep) { row.push(cell); cell = ''; }
       else if (c === '\n' || c === '\r') {
         if (c === '\r' && text[i + 1] === '\n') i++;
         row.push(cell); rows.push(row); row = []; cell = '';
@@ -498,23 +511,56 @@ const App = {
     }
   },
 
-  loadCsvFile(file) {
+  // Accepts the CSV worksheet, or an Excel file as-is (e.g. iTAP's SearchResults.xlsx).
+  // Excel files are read with SheetJS, loaded only when one is picked.
+  async loadCsvFile(file) {
     if (!file) return;
-    const fr = new FileReader();
-    fr.onload = () => this.applyCsv(fr.result, file.name);
-    fr.readAsText(file);
+    try {
+      const buf = await file.arrayBuffer();
+      const b = new Uint8Array(buf.slice(0, 4));
+      const isZip = b[0] === 0x50 && b[1] === 0x4B;               // .xlsx
+      const isOle = b[0] === 0xD0 && b[1] === 0xCF;               // old .xls
+      if (isZip || isOle || /\.xlsx?$/i.test(file.name)) {
+        this.setStatus('csvStatus', 'Reading Excel file…');
+        await H.loadScript(CONFIG.sheetJsUrl, () => window.XLSX);
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }).map(r => r.map(c => String(c ?? '')));
+        this.applyRows(rows, file.name);
+      } else {
+        let text;
+        if (b[0] === 0xFF && b[1] === 0xFE) text = new TextDecoder('utf-16le').decode(buf);       // Excel "Unicode Text"
+        else if (b[0] === 0xFE && b[1] === 0xFF) text = new TextDecoder('utf-16be').decode(buf);
+        else text = new TextDecoder('utf-8').decode(buf);
+        this.applyCsv(text, file.name);
+      }
+    } catch (e) {
+      console.error(e);
+      this.setStatus('csvStatus', `Couldn't read ${H.esc(file.name)}: ${H.esc(e.message)}`, true);
+    }
   },
 
   applyCsv(text, sourceName) {
-    const rows = H.parseCsv(text);
-    if (!rows.length) { this.setStatus('csvStatus', 'That CSV is empty.', true); return; }
-    const head = rows[0].map(h => h.trim().toLowerCase());
+    this.applyRows(H.parseCsv(text), sourceName);
+  },
+
+  applyRows(rows, sourceName) {
+    rows = rows.filter(r => r.some(c => String(c).trim() !== ''));
+    if (!rows.length) { this.setStatus('csvStatus', 'That file is empty.', true); return; }
+    // Header is normally row 1, but tolerate a title line or two above it.
+    const hRow = Math.max(0, rows.slice(0, 10).findIndex(r => r.some(c => /\bnbi\b/i.test(c))));
+    rows = rows.slice(hRow);
+    const head = rows[0].map(h => String(h).replace(/^\uFEFF/, '').trim().toLowerCase());
     const col = (...names) => head.findIndex(h => names.some(n => h === n || h.replace(/[^a-z]/g, '') === n.replace(/[^a-z]/g, '')));
     // Reads either the worksheet this page produces or iTAP's own Search Results export
     // saved as CSV ("NBI Number", "Current Status", "Current Status Note").
     const iNbi = col('nbi', 'nbi number', 'nbi_number'), iSt = col('itap status', 'current status', 'status'),
           iOn = col('checked on', 'date'), iBy = col('checked by'), iNote = col('note', 'notes', 'current status note');
-    if (iNbi < 0 || iSt < 0) { this.setStatus('csvStatus', 'The CSV needs an "NBI" column and an "iTAP Status" column in its first row.', true); return; }
+    if (iNbi < 0 || iSt < 0) {
+      const found = head.filter(Boolean).slice(0, 8).map(h => `“${H.esc(h)}”`).join(', ');
+      this.setStatus('csvStatus', `${H.esc(sourceName)}: couldn't find ${iNbi < 0 ? 'an NBI column' : ''}${iNbi < 0 && iSt < 0 ? ' or ' : ''}${iSt < 0 ? 'a status column (iTAP Status / Current Status)' : ''}. Columns found: ${found || 'none'}${head.length > 8 ? '…' : ''}`, true);
+      return;
+    }
     const map = new Map(), bad = [];
     for (const r of rows.slice(1)) {
       const nbi = H.normNBI(r[iNbi]);
