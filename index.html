@@ -91,7 +91,7 @@
     <div class="hint">
       The Select/Non-Select layers don't record demolitions, so the iTAP result for each bridge is kept in a CSV you maintain in Excel.
       <b>Download iTAP worksheet</b> gives you every INDOT bridge with what SHAARD currently says, plus any iTAP entries already loaded.
-      Fill in the <b>iTAP Status</b> column (<i>Demolished</i> or <i>Standing</i>; <i>Replaced</i> and <i>Removed</i> count as demolished), save as CSV, and load it back here.
+      Fill in the <b>iTAP Status</b> column (<i>Demolished</i> or <i>Standing</i>; iTAP's own <i>Nonextant</i> / <i>Extant</i> wording also works), save as CSV, and load it back here. You can also load iTAP's <b>Search Results</b> export directly after saving it as CSV in Excel.
       Only the NBI, iTAP Status, Checked On, Checked By and Note columns are read; other columns are ignored.
     </div>
   </div>
@@ -202,7 +202,10 @@ const H = {
   itapStatus(v) {
     const r = String(v || '').trim().toLowerCase();
     if (!r) return null;
-    if (/demolish|replaced|removed|gone|razed/.test(r)) return 'demolished';
+    // iTAP's own wording: "Nonextant" = gone; "Extant - vehicular / pedestrian service"
+    // and "Extant - not in service" = still physically there. Test the "non" forms first,
+    // since "nonextant" also contains "extant".
+    if (/non-?\s*extant|not extant|demolish|replaced|removed|gone|razed/.test(r)) return 'demolished';
     if (/stand|extant|in service|open|exist|present/.test(r)) return 'standing';
     return null;
   },
@@ -507,8 +510,10 @@ const App = {
     if (!rows.length) { this.setStatus('csvStatus', 'That CSV is empty.', true); return; }
     const head = rows[0].map(h => h.trim().toLowerCase());
     const col = (...names) => head.findIndex(h => names.some(n => h === n || h.replace(/[^a-z]/g, '') === n.replace(/[^a-z]/g, '')));
-    const iNbi = col('nbi', 'nbi number', 'nbi_number'), iSt = col('itap status', 'status'),
-          iOn = col('checked on', 'date'), iBy = col('checked by'), iNote = col('note', 'notes');
+    // Reads either the worksheet this page produces or iTAP's own Search Results export
+    // saved as CSV ("NBI Number", "Current Status", "Current Status Note").
+    const iNbi = col('nbi', 'nbi number', 'nbi_number'), iSt = col('itap status', 'current status', 'status'),
+          iOn = col('checked on', 'date'), iBy = col('checked by'), iNote = col('note', 'notes', 'current status note');
     if (iNbi < 0 || iSt < 0) { this.setStatus('csvStatus', 'The CSV needs an "NBI" column and an "iTAP Status" column in its first row.', true); return; }
     const map = new Map(), bad = [];
     for (const r of rows.slice(1)) {
@@ -524,7 +529,7 @@ const App = {
     const known = new Set(this.indot.map(b => b.nbiKey));
     const unknown = this.indot.length ? [...map.keys()].filter(k => !known.has(k)) : [];
     let msg = `✓ ${H.esc(sourceName)}: ${map.size} bridge${map.size === 1 ? '' : 's'} with an iTAP status`;
-    if (unknown.length) msg += ` · ⚠ ${unknown.length} NBI not in the INDOT layers (${H.esc(unknown.slice(0, 5).join(', '))}${unknown.length > 5 ? '…' : ''})`;
+    if (unknown.length) msg += ` · ${unknown.length} of them aren't in the Select/Non-Select layers and are ignored`;
     if (bad.length) msg += ` · ⚠ ${bad.length} unreadable status value${bad.length === 1 ? '' : 's'} skipped: ${H.esc(bad.slice(0, 3).join('; '))}${bad.length > 3 ? '…' : ''}`;
     this.setStatus('csvStatus', msg, false);
     if (this.indot.length) this.recompute(false);
