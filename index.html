@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge Status Checker</title>
+<style>
+  :root {
+    --primary: #0d6efd; --tool: #0b9e3f; --tool-dark: #098434;
+    --danger: #dc3545; --warn: #b8860b;
+    --bg: #f4f7f6; --panel: #ffffff; --border: #e6eaed;
+    --text: #2c3e50; --text-muted: #8a94a3;
+    --demolished: #383838; --standing: #198754; --unknown: #8a94a3;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+  .top-bar { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: white; padding: 12px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  .top-bar h1 { margin: 0; font-size: 1.25em; }
+  .top-bar .subtitle { font-size: 0.8em; color: var(--text-muted); }
+  .top-bar a { margin-left: auto; font-size: 0.85em; color: var(--primary); }
+  main { max-width: 1400px; margin: 0 auto; padding: 16px 20px 40px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
+  .panel h3 { margin: 0 0 10px; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .btn { padding: 8px 14px; cursor: pointer; border: 1.5px solid var(--tool); background: white; color: var(--tool); border-radius: 6px; font-weight: 600; font-size: 13px; }
+  .btn:hover { background: #eafbf1; }
+  .btn.solid { background: var(--tool); color: white; }
+  .btn.solid:hover { background: var(--tool-dark); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .hint { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }
+  .status-line { font-size: 13px; }
+  .status-line.err { color: var(--danger); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .card { border: 1.5px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; background: white; text-align: left; font: inherit; color: inherit; }
+  .card:hover { border-color: #b9c2cc; }
+  .card.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(13,110,253,0.15); }
+  .card .n { font-size: 1.6em; font-weight: 700; }
+  .card .t { font-size: 12.5px; font-weight: 600; margin-top: 2px; }
+  .card .d { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; line-height: 1.35; }
+  .card .new { font-size: 11px; color: var(--primary); font-weight: 600; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .toolbar input[type=search] { padding: 7px 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 13px; min-width: 240px; }
+  .toolbar label { font-size: 13px; display: inline-flex; gap: 5px; align-items: center; }
+  .count { font-size: 12.5px; color: var(--text-muted); margin-left: auto; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); border-bottom: 2px solid var(--border); padding: 8px 8px; white-space: nowrap; }
+  td { border-bottom: 1px solid var(--border); padding: 8px 8px; vertical-align: top; }
+  tr:hover td { background: #fafbfc; }
+  .id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  .name { color: var(--text-muted); font-size: 12px; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; color: white; white-space: nowrap; }
+  .b-demolished { background: var(--demolished); }
+  .b-standing { background: var(--standing); }
+  .b-unknown { background: var(--unknown); }
+  .issue { font-weight: 600; font-size: 12.5px; }
+  .issue-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+  .warn { color: var(--warn); font-size: 11.5px; margin-top: 3px; }
+  .tag-new { display: inline-block; background: var(--primary); color: white; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
+  .links a { display: inline-block; margin: 0 6px 3px 0; font-size: 12px; color: var(--primary); text-decoration: none; white-space: nowrap; }
+  .links a:hover { text-decoration: underline; }
+  .muted { color: var(--text-muted); }
+  .empty { padding: 30px; text-align: center; color: var(--text-muted); }
+  progress { width: 220px; }
+</style>
+</head>
+<body>
+<div class="top-bar">
+  <h1>Bridge Status Checker</h1>
+  <span class="subtitle">Compares demolished status across Historic Bridges, County Survey, INDOT Select/Non-Select Bridges and your iTAP checks</span>
+</div>
+
+<main>
+  <div class="panel">
+    <h3>1. Live GIS data</h3>
+    <div class="row">
+      <button class="btn solid" id="btnReload" onclick="App.loadAll()">↻ Reload data</button>
+      <span class="status-line" id="dataStatus">Not loaded yet.</span>
+    </div>
+    <div class="hint">Data is read live from the state GIS services each time this page opens, so results always reflect the current records. Loading takes about 10–30 seconds.</div>
+  </div>
+
+  <div class="panel">
+    <h3>2. iTAP verification file (CSV)</h3>
+    <div class="row">
+      <button class="btn" onclick="document.getElementById('csvInput').click()">⬆️ Load iTAP CSV</button>
+      <input type="file" id="csvInput" accept=".csv,text/csv" style="display:none" onchange="App.loadCsvFile(this.files[0]); this.value='';">
+      <button class="btn" id="btnWorksheet" onclick="App.downloadWorksheet()" disabled>⬇️ Download iTAP worksheet</button>
+      <span class="status-line" id="csvStatus">No iTAP file loaded.</span>
+    </div>
+    <div class="hint">
+      The Select/Non-Select layers don't record demolitions, so the iTAP result for each bridge is kept in a CSV you maintain in Excel.
+      <b>Download iTAP worksheet</b> gives you every INDOT bridge with what SHAARD currently says, plus any iTAP entries already loaded.
+      Fill in the <b>iTAP Status</b> column (<i>Demolished</i> or <i>Standing</i>; <i>Replaced</i> and <i>Removed</i> count as demolished), save as CSV, and load it back here.
+      Only the NBI, iTAP Status, Checked On, Checked By and Note columns are read; other columns are ignored.
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>3. Results</h3>
+    <div class="cards" id="cards"></div>
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Filter by NBI, HB-, survey #, or name" oninput="App.render()">
+      <label><input type="checkbox" id="warnOnly" onchange="App.render()"> Match warnings only</label>
+      <label><input type="checkbox" id="newOnly" onchange="App.render()"> New since last run only</label>
+      <button class="btn" id="btnExport" onclick="App.exportIssues()" disabled>📤 Export shown rows (CSV)</button>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Issue</th><th>INDOT bridge</th><th>Historic Bridge</th><th>County Survey</th><th>iTAP</th><th>How matched</th><th>Links</th>
+        </tr></thead>
+        <tbody id="tbody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+// =====================================================================
+// CONFIG — the only part that should ever need editing.
+// If a GIS service moves or renames a field, change it here.
+// =====================================================================
+const CONFIG = {
+  layers: {
+    historicBridges: {
+      url: 'https://gisdata.in.gov/server/rest/services/Hosted/HistoricStructures_1/FeatureServer/3',
+      idField: 'shaard_id', nameField: 'historicname', ratingField: 'rating'
+    },
+    survey: {
+      url: 'https://gisdata.in.gov/server/rest/services/Hosted/HistoricStructures_1/FeatureServer/2',
+      idField: 'shaard_id', nameField: 'historicname', ratingField: 'rating',
+      // Only bridge-like survey records are compared (the layer has ~200,000 points and
+      // no "is a bridge" field). Name contains bridge / br. / culvert.
+      where: "UPPER(historicname) LIKE '%BRIDGE%' OR UPPER(historicname) LIKE '%CULVERT%' OR UPPER(historicname) LIKE '% BR.%' OR UPPER(historicname) LIKE '% BR %' OR UPPER(historicname) LIKE '% BR'"
+    },
+    select: {
+      url: 'https://gisdata.in.gov/server/rest/services/Hosted/Select_Bridges_RO/FeatureServer/8',
+      label: 'Select'
+    },
+    nonSelect: {
+      url: 'https://gisdata.in.gov/server/rest/services/Hosted/Non_Select_Bridges_RO/FeatureServer/0',
+      label: 'Non-Select'
+    }
+  },
+  indotFields: {
+    nbi: 'nbi_number',
+    countyBridgeNo: 'county_bridge_number',
+    link: 'hb__or_ihssi__when_no_entry_in_',   // free text: "HB-0018" or "IHSSI # 003-214-20617" or blank
+    lat: 'latitude', lon: 'longitude'
+  },
+  // Two records with no shared ID are treated as the same bridge only if each is the
+  // other's closest candidate AND they are within this distance.
+  matchRadiusMeters: 200,
+  // An ID match whose two points are farther apart than this gets a warning (the ID or
+  // one of the points is probably wrong).
+  idMatchFarMeters: 500,
+  // When this page is hosted on a website, a CSV with this name sitting next to it is
+  // loaded automatically. Opened from a local folder, use the Load button instead.
+  autoLoadCsv: 'itap_verified.csv'
+};
+
+// =====================================================================
+// Issue categories, in the order a row is tested against them.
+// =====================================================================
+const CATEGORIES = [
+  { key: 'notifyShaard', title: 'iTAP: demolished, SHAARD not updated',
+    desc: 'iTAP confirms the bridge is gone but a SHAARD record still rates it as standing. Send to SHAARD staff.' },
+  { key: 'checkShaard', title: 'iTAP: standing, SHAARD says demolished',
+    desc: 'iTAP shows the bridge in service but a SHAARD record rates it Demolished. One of them is wrong.' },
+  { key: 'disagree', title: 'Historic Bridge vs Survey disagree',
+    desc: 'The two SHAARD layers give different answers and iTAP has not been checked.' },
+  { key: 'verifyItap', title: 'Verify in iTAP',
+    desc: 'Still in the INDOT inventory, but SHAARD says demolished. Look it up in iTAP and record the result.' },
+  { key: 'ok', title: 'Consistent',
+    desc: 'Every source that has an answer agrees.' }
+];
+
+// =====================================================================
+// Helpers
+// =====================================================================
+const H = {
+  esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
+  today() { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; },
+  dist(a, b) {
+    const R = 6371000, r = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  },
+  // "Demolished" → demolished; blank / "Not Rated" → unknown; any real rating → standing.
+  status(rating) {
+    const r = String(rating || '').trim().toLowerCase();
+    if (!r || r === 'not rated') return 'unknown';
+    if (r.includes('demolish') || r.includes('delisted')) return 'demolished';
+    return 'standing';
+  },
+  itapStatus(v) {
+    const r = String(v || '').trim().toLowerCase();
+    if (!r) return null;
+    if (/demolish|replaced|removed|gone|razed/.test(r)) return 'demolished';
+    if (/stand|extant|in service|open|exist|present/.test(r)) return 'standing';
+    return null;
+  },
+  normHB(id) { const m = String(id || '').match(/HB-?\s*(\d+)/i); return m ? 'HB-' + m[1].padStart(4, '0') : null; },
+  normNBI(v) { return String(v ?? '').trim().toUpperCase().replace(/^0+(?=.)/, ''); },
+  parseLink(raw) {
+    const v = String(raw || '');
+    const hb = H.normHB(v);
+    if (hb) return { type: 'hb', id: hb };
+    const s = v.match(/\d{3}-\d{3}-\d{5}/);
+    if (s) return { type: 'survey', id: s[0] };
+    return { type: 'none', id: null };
+  },
+  // Every number in a name, so "Indiana State Highway Bridge Number 57-28-341C" gives
+  // {57, 28, 341} and still lines up with a survey name of "County Bridge Number 341".
+  nameNumbers(name) {
+    return new Set((String(name || '').match(/\d+/g) || []).map(n => n.replace(/^0+(?=\d)/, '')));
+  },
+  // True only when both names carry numbers and they have none in common
+  // ("Bridge Number 99" vs "County Bridge No 9").
+  numbersConflict(a, b) {
+    const na = H.nameNumbers(a), nb = H.nameNumbers(b);
+    if (!na.size || !nb.size) return false;
+    for (const n of na) if (nb.has(n)) return false;
+    return true;
+  },
+  shaardUrl(id) {
+    if (!id) return null;
+    return id.startsWith('HB-') ? 'https://shaard.dnr.in.gov/viewbridge?snum=' + id
+                                : 'https://shaard.dnr.in.gov/viewihssicounty?snum=' + id;
+  },
+  mapUrl(lat, lon) { return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`; },
+  svUrl(lat, lon) { return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`; },
+  csvCell(v) { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; },
+  download(name, text) {
+    const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+  // Small RFC-4180 CSV reader (quoted fields, embedded commas/newlines, BOM).
+  parseCsv(text) {
+    text = text.replace(/^﻿/, '');
+    const rows = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) {
+        if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+        else cell += c;
+      } else if (c === '"') q = true;
+      else if (c === ',') { row.push(cell); cell = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell); rows.push(row); row = []; cell = '';
+      } else cell += c;
+    }
+    if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter(r => r.some(c => c.trim() !== ''));
+  }
+};
+
+// Grid index so the nearest-neighbour search stays fast statewide.
+class Grid {
+  constructor(items, cell = 0.01) {
+    this.cell = cell; this.map = new Map();
+    for (const it of items) {
+      if (it.lat == null) continue;
+      const k = this.key(it.lat, it.lon);
+      if (!this.map.has(k)) this.map.set(k, []);
+      this.map.get(k).push(it);
+    }
+  }
+  key(lat, lon) { return Math.floor(lat / this.cell) + ':' + Math.floor(lon / this.cell); }
+  // Every item within radiusM, closest first.
+  near(p, radiusM) {
+    const span = Math.ceil(radiusM / 800) + 1;   // 0.01° ≈ 800–1100 m in Indiana
+    const bi = Math.floor(p.lat / this.cell), bj = Math.floor(p.lon / this.cell), out = [];
+    for (let i = bi - span; i <= bi + span; i++) for (let j = bj - span; j <= bj + span; j++) {
+      for (const it of this.map.get(i + ':' + j) || []) {
+        const d = H.dist(p, it);
+        if (d <= radiusM) out.push({ it, d });
+      }
+    }
+    return out.sort((a, b) => a.d - b.d);
+  }
+}
+
+// =====================================================================
+// Data loading
+// =====================================================================
+const Data = {
+  async query(url, params) {
+    const r = await fetch(url + '/query?' + new URLSearchParams({ f: 'json', ...params }));
+    if (!r.ok) throw new Error(`HTTP ${r.status} from ${url}`);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message || 'GIS service error');
+    return j;
+  },
+  // Each layer names its object-ID field differently (objectid, f__objectid…); paging
+  // needs a stable sort on it, so ask the layer once.
+  oidCache: new Map(),
+  async oidField(url) {
+    if (!this.oidCache.has(url)) {
+      const j = await (await fetch(url + '?f=json')).json();
+      this.oidCache.set(url, j.objectIdField || (j.fields || []).find(f => f.type === 'esriFieldTypeOID')?.name || 'objectid');
+    }
+    return this.oidCache.get(url);
+  },
+  async all(url, where, outFields = '*') {
+    const out = []; let offset = 0;
+    const oid = await this.oidField(url);
+    for (;;) {
+      const j = await this.query(url, { where, outFields, returnGeometry: true, outSR: 4326, orderByFields: oid, resultOffset: offset, resultRecordCount: 1000 });
+      out.push(...j.features);
+      if (!j.exceededTransferLimit && j.features.length < 1000) break;
+      offset += j.features.length;
+    }
+    return out;
+  },
+  shaardRec(f, cfg, layer) {
+    const a = f.attributes;
+    return {
+      layer, id: a[cfg.idField], name: a[cfg.nameField] || '', rating: a[cfg.ratingField] || '',
+      status: H.status(a[cfg.ratingField]),
+      lat: f.geometry?.y ?? null, lon: f.geometry?.x ?? null
+    };
+  },
+  indotRec(f, cfg) {
+    const a = f.attributes, F = CONFIG.indotFields;
+    const lat = f.geometry?.y ?? a[F.lat], lon = f.geometry?.x ?? a[F.lon];
+    return {
+      kind: cfg.label, nbi: String(a[F.nbi] ?? '').trim(), nbiKey: H.normNBI(a[F.nbi]),
+      countyNo: a[F.countyBridgeNo] || '', linkRaw: a[F.link] || '', link: H.parseLink(a[F.link]),
+      lat: lat ?? null, lon: lon ?? null
+    };
+  }
+};
+
+// =====================================================================
+// Matching
+// =====================================================================
+const Matcher = {
+  // Mutual-nearest pairing : a pair only
+  // counts when each record is the other's single closest candidate.
+  mutualPairs(groupA, gridB, groupB, gridA, radius) {
+    const best = (p, grid) => grid.near(p, radius)[0] || null;
+    const pairs = new Map();
+    for (const a of groupA) {
+      if (a.lat == null) continue;
+      const nb = best(a, gridB);
+      if (!nb) continue;
+      const back = best(nb.it, gridA);
+      if (back && back.it === a) pairs.set(a, { other: nb.it, d: nb.d });
+    }
+    return pairs;
+  },
+
+  build(hbList, svList, indotList, itap) {
+    const R = CONFIG.matchRadiusMeters;
+    const hbById = new Map(hbList.map(h => [h.id, h]));
+    const svById = new Map(svList.map(s => [s.id, s]));
+    const hbGrid = new Grid(hbList), svGrid = new Grid(svList);
+
+    // Historic Bridge ⇄ County Survey (no shared ID — distance only)
+    const hbToSv = this.mutualPairs(hbList, svGrid, svList, hbGrid, R);
+    const svToHb = new Map();
+    for (const [h, p] of hbToSv) svToHb.set(p.other, { other: h, d: p.d });
+
+    const usedHb = new Set(), usedSv = new Set(), rows = [];
+
+    for (const b of indotList) {
+      const row = { indot: b, hb: null, sv: null, how: [], warn: [] };
+      if (b.link.type === 'hb') {
+        row.hb = hbById.get(b.link.id) || null;
+        if (row.hb) row.how.push('HB by ID');
+        else row.warn.push(`${b.link.id} is not in the Historic Bridges layer`);
+      } else if (b.link.type === 'survey') {
+        row.sv = svById.get(b.link.id) || null;
+        if (row.sv) row.how.push('Survey by ID');
+        else row.warn.push(`Survey #${b.link.id} not found`);
+      }
+      // Fill the missing side from the HB⇄Survey pairing
+      if (row.hb && !row.sv && hbToSv.has(row.hb)) { const p = hbToSv.get(row.hb); row.sv = p.other; row.how.push(`Survey by distance (${Math.round(p.d)} m from HB)`); }
+      if (row.sv && !row.hb && svToHb.has(row.sv)) { const p = svToHb.get(row.sv); row.hb = p.other; row.how.push(`HB by distance (${Math.round(p.d)} m from survey)`); }
+      // No usable ID: fall back to distance from the INDOT point itself
+      if (!row.hb && !row.sv && b.link.type === 'none' && b.lat != null) {
+        const nh = hbGrid.near(b, R)[0], ns = svGrid.near(b, R)[0];
+        if (nh) { row.hb = nh.it; row.how.push(`HB by distance (${Math.round(nh.d)} m)`); }
+        if (ns) { row.sv = ns.it; row.how.push(`Survey by distance (${Math.round(ns.d)} m)`); }
+        if (!nh && !ns) row.how.push(`No ID on file; nothing within ${R} m`);
+      }
+      // Sanity checks on the matches
+      for (const rec of [row.hb, row.sv]) {
+        if (rec && b.lat != null && rec.lat != null) {
+          const d = H.dist(b, rec);
+          if (d > CONFIG.idMatchFarMeters) row.warn.push(`${rec.id} is ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m'} from the INDOT point`);
+        }
+      }
+      if (row.hb) usedHb.add(row.hb);
+      if (row.sv) usedSv.add(row.sv);
+      row.itap = itap.get(b.nbiKey) || null;
+      rows.push(row);
+    }
+
+    // Historic Bridge ⇄ Survey pairs that aren't in the INDOT inventory at all
+    for (const [h, p] of hbToSv) {
+      if (usedHb.has(h) || usedSv.has(p.other)) continue;
+      rows.push({ indot: null, hb: h, sv: p.other, how: [`HB ⇄ Survey by distance (${Math.round(p.d)} m)`], warn: [], itap: null });
+    }
+
+    for (const row of rows) {
+      if (row.hb && row.sv) {
+        if (H.numbersConflict(row.hb.name, row.sv.name)) row.warn.push(`Numbers in the two names don't match (“${row.hb.name}” vs “${row.sv.name}”) — may not be the same bridge`);
+      }
+      row.cat = this.classify(row);
+      row.key = [row.cat, row.indot?.nbiKey || '', row.hb?.id || '', row.sv?.id || ''].join('|');
+    }
+    return rows;
+  },
+
+  classify(row) {
+    const shaard = [row.hb, row.sv].filter(r => r && r.status !== 'unknown');
+    const anyDem = shaard.some(r => r.status === 'demolished');
+    const anyStand = shaard.some(r => r.status === 'standing');
+    const it = row.itap?.status;
+    if (it === 'demolished' && anyStand) return 'notifyShaard';
+    if (it === 'standing' && anyDem) return 'checkShaard';
+    if (!it && anyDem && anyStand) return 'disagree';
+    if (!it && anyDem && row.indot) return 'verifyItap';
+    return 'ok';
+  }
+};
+
+// =====================================================================
+// App
+// =====================================================================
+const App = {
+  hb: [], sv: [], indot: [], itap: new Map(), itapSource: null,
+  rows: [], activeCat: 'notifyShaard', prevKeys: null,
+
+  async init() {
+    await this.loadAll();
+    // Hosted copy: pick up a CSV published next to this page, if there is one.
+    if (!this.itapSource && location.protocol.startsWith('http')) {
+      try {
+        const r = await fetch(CONFIG.autoLoadCsv, { cache: 'no-store' });
+        if (r.ok) { const t = await r.text(); if (/nbi/i.test(t.slice(0, 500))) this.applyCsv(t, CONFIG.autoLoadCsv + ' (published with this page)'); }
+      } catch (e) { /* none published — fine */ }
+    }
+  },
+
+  setStatus(id, html, err) { const el = document.getElementById(id); el.innerHTML = html; el.classList.toggle('err', !!err); },
+
+  async loadAll() {
+    const L = CONFIG.layers;
+    document.getElementById('btnReload').disabled = true;
+    try {
+      this.setStatus('dataStatus', '<progress></progress> Loading Historic Bridges…');
+      this.hb = (await Data.all(L.historicBridges.url, '1=1')).map(f => Data.shaardRec(f, L.historicBridges, 'hb'));
+      this.setStatus('dataStatus', '<progress></progress> Loading INDOT Select / Non-Select Bridges…');
+      this.indot = [
+        ...(await Data.all(L.select.url, '1=1')).map(f => Data.indotRec(f, L.select)),
+        ...(await Data.all(L.nonSelect.url, '1=1')).map(f => Data.indotRec(f, L.nonSelect))
+      ];
+      this.setStatus('dataStatus', '<progress></progress> Loading bridge records from the County Survey…');
+      const bridgeLike = /\b(bridge|br\.?|culvert)\b/i;
+      const svMap = new Map();
+      for (const f of await Data.all(L.survey.url, L.survey.where)) {
+        const s = Data.shaardRec(f, L.survey, 'sv');
+        if (bridgeLike.test(s.name)) svMap.set(s.id, s);
+      }
+      // Survey records an INDOT bridge points to by ID, even if the name doesn't say "bridge"
+      const wanted = [...new Set(this.indot.filter(b => b.link.type === 'survey').map(b => b.link.id))].filter(id => !svMap.has(id));
+      for (let i = 0; i < wanted.length; i += 100) {
+        const ids = wanted.slice(i, i + 100).map(id => `'${id}'`).join(',');
+        for (const f of await Data.all(L.survey.url, `${L.survey.idField} IN (${ids})`)) {
+          const s = Data.shaardRec(f, L.survey, 'sv'); svMap.set(s.id, s);
+        }
+      }
+      this.sv = [...svMap.values()];
+      this.setStatus('dataStatus', `✓ Loaded ${this.hb.length.toLocaleString()} Historic Bridges, ${this.sv.length.toLocaleString()} bridge-like County Survey records, ${this.indot.length.toLocaleString()} INDOT bridges — ${new Date().toLocaleString()}`);
+      document.getElementById('btnWorksheet').disabled = false;
+      this.recompute(true);
+    } catch (e) {
+      console.error(e);
+      this.setStatus('dataStatus', `Couldn't load the GIS data: ${H.esc(e.message)}. Check the internet connection, or if this file was opened from a folder, try a different browser (some block web requests from local files).`, true);
+    } finally {
+      document.getElementById('btnReload').disabled = false;
+    }
+  },
+
+  loadCsvFile(file) {
+    if (!file) return;
+    const fr = new FileReader();
+    fr.onload = () => this.applyCsv(fr.result, file.name);
+    fr.readAsText(file);
+  },
+
+  applyCsv(text, sourceName) {
+    const rows = H.parseCsv(text);
+    if (!rows.length) { this.setStatus('csvStatus', 'That CSV is empty.', true); return; }
+    const head = rows[0].map(h => h.trim().toLowerCase());
+    const col = (...names) => head.findIndex(h => names.some(n => h === n || h.replace(/[^a-z]/g, '') === n.replace(/[^a-z]/g, '')));
+    const iNbi = col('nbi', 'nbi number', 'nbi_number'), iSt = col('itap status', 'status'),
+          iOn = col('checked on', 'date'), iBy = col('checked by'), iNote = col('note', 'notes');
+    if (iNbi < 0 || iSt < 0) { this.setStatus('csvStatus', 'The CSV needs an "NBI" column and an "iTAP Status" column in its first row.', true); return; }
+    const map = new Map(), bad = [];
+    for (const r of rows.slice(1)) {
+      const nbi = H.normNBI(r[iNbi]);
+      if (!nbi) continue;
+      const raw = (r[iSt] || '').trim();
+      const st = H.itapStatus(raw);
+      if (raw && !st) bad.push(`${r[iNbi]} ("${raw}")`);
+      if (!st) continue;
+      map.set(nbi, { status: st, raw, on: iOn >= 0 ? r[iOn] || '' : '', by: iBy >= 0 ? r[iBy] || '' : '', note: iNote >= 0 ? r[iNote] || '' : '' });
+    }
+    this.itap = map; this.itapSource = sourceName;
+    const known = new Set(this.indot.map(b => b.nbiKey));
+    const unknown = this.indot.length ? [...map.keys()].filter(k => !known.has(k)) : [];
+    let msg = `✓ ${H.esc(sourceName)}: ${map.size} bridge${map.size === 1 ? '' : 's'} with an iTAP status`;
+    if (unknown.length) msg += ` · ⚠ ${unknown.length} NBI not in the INDOT layers (${H.esc(unknown.slice(0, 5).join(', '))}${unknown.length > 5 ? '…' : ''})`;
+    if (bad.length) msg += ` · ⚠ ${bad.length} unreadable status value${bad.length === 1 ? '' : 's'} skipped: ${H.esc(bad.slice(0, 3).join('; '))}${bad.length > 3 ? '…' : ''}`;
+    this.setStatus('csvStatus', msg, false);
+    if (this.indot.length) this.recompute(false);
+  },
+
+  // "New since last run" = issue rows not present the previous time this browser
+  // loaded data. Kept in this browser only; purely a convenience.
+  recompute(freshLoad) {
+    this.rows = Matcher.build(this.hb, this.sv, this.indot, this.itap);
+    const issues = this.rows.filter(r => r.cat !== 'ok').map(r => r.key);
+    if (freshLoad) {
+      try {
+        const prev = JSON.parse(localStorage.getItem('bridgeCheck.lastIssues') || 'null');
+        this.prevKeys = prev ? new Set(prev.keys) : null;
+        this.prevDate = prev?.date;
+      } catch (e) { this.prevKeys = null; }
+    }
+    try { localStorage.setItem('bridgeCheck.lastIssues', JSON.stringify({ date: new Date().toLocaleDateString(), keys: issues })); } catch (e) { }
+    for (const r of this.rows) r.isNew = !!(this.prevKeys && r.cat !== 'ok' && !this.prevKeys.has(r.key));
+    document.getElementById('btnExport').disabled = false;
+    this.render();
+  },
+
+  setCat(k) { this.activeCat = k; this.render(); },
+
+  render() {
+    // Cards
+    const counts = {}, newCounts = {};
+    for (const r of this.rows) { counts[r.cat] = (counts[r.cat] || 0) + 1; if (r.isNew) newCounts[r.cat] = (newCounts[r.cat] || 0) + 1; }
+    const warnN = this.rows.filter(r => r.warn.length).length;
+    document.getElementById('cards').innerHTML = CATEGORIES.map(c => `
+      <button class="card ${this.activeCat === c.key ? 'active' : ''}" onclick="App.setCat('${c.key}')">
+        <div class="n">${counts[c.key] || 0}</div>
+        <div class="t">${H.esc(c.title)}</div>
+        ${newCounts[c.key] ? `<div class="new">${newCounts[c.key]} new since ${H.esc(this.prevDate || 'last run')}</div>` : ''}
+        <div class="d">${H.esc(c.desc)}</div>
+      </button>`).join('') + `
+      <button class="card ${this.activeCat === 'all' ? 'active' : ''}" onclick="App.setCat('all')">
+        <div class="n">${this.rows.length}</div><div class="t">All compared</div>
+        <div class="d">${warnN} with a match warning (⚠) worth a second look.</div>
+      </button>`;
+
+    // Table
+    const rows = this.visibleRows();
+    document.getElementById('count').textContent = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
+    const tb = document.getElementById('tbody');
+    if (!rows.length) { tb.innerHTML = `<tr><td colspan="7" class="empty">${this.rows.length ? 'Nothing in this view.' : 'Loading…'}</td></tr>`; return; }
+    const MAX = 1500;
+    tb.innerHTML = rows.slice(0, MAX).map(r => this.rowHtml(r)).join('') +
+      (rows.length > MAX ? `<tr><td colspan="7" class="empty">Showing the first ${MAX}. Narrow the filter, or use Export to get every row.</td></tr>` : '');
+  },
+
+  visibleRows() {
+    const q = document.getElementById('search').value.trim().toLowerCase();
+    const warnOnly = document.getElementById('warnOnly').checked, newOnly = document.getElementById('newOnly').checked;
+    return this.rows.filter(r => {
+      if (this.activeCat !== 'all' && r.cat !== this.activeCat) return false;
+      if (warnOnly && !r.warn.length) return false;
+      if (newOnly && !r.isNew) return false;
+      if (q) {
+        const hay = [r.indot?.nbi, r.indot?.linkRaw, r.indot?.countyNo, r.hb?.id, r.hb?.name, r.sv?.id, r.sv?.name].join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  },
+
+  badge(status, label) { return `<span class="badge b-${status}">${H.esc(label || status)}</span>`; },
+
+  rowHtml(r) {
+    const cat = CATEGORIES.find(c => c.key === r.cat);
+    const rec = x => x ? `<div class="id">${H.esc(x.id)}</div><div class="name">${H.esc(x.name)}</div>${this.badge(x.status, x.rating || 'No rating')}` : '<span class="muted">—</span>';
+    const b = r.indot;
+    const p = b && b.lat != null ? b : (r.hb || r.sv);
+    const links = [];
+    if (r.hb) links.push(`<a href="${H.shaardUrl(r.hb.id)}" target="_blank" rel="noopener">SHAARD ${H.esc(r.hb.id)}</a>`);
+    if (r.sv) links.push(`<a href="${H.shaardUrl(r.sv.id)}" target="_blank" rel="noopener">SHAARD survey</a>`);
+    if (p && p.lat != null) links.push(`<a href="${H.mapUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Map</a>`, `<a href="${H.svUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Street View</a>`);
+    return `<tr>
+      <td><div class="issue">${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}</td>
+      <td>${b ? `<div class="id">NBI ${H.esc(b.nbi)}</div><div class="name">${H.esc(b.kind)}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>${b.linkRaw ? `<div class="name">On file: ${H.esc(b.linkRaw)}</div>` : ''}` : '<span class="muted">Not in INDOT inventory</span>'}</td>
+      <td>${rec(r.hb)}</td>
+      <td>${rec(r.sv)}</td>
+      <td>${r.itap ? `${this.badge(r.itap.status, r.itap.raw || r.itap.status)}<div class="name">${H.esc([r.itap.on, r.itap.by].filter(Boolean).join(' · '))}</div>${r.itap.note ? `<div class="name">${H.esc(r.itap.note)}</div>` : ''}` : (b ? '<span class="muted">Not checked</span>' : '<span class="muted">—</span>')}</td>
+      <td class="name">${H.esc(r.how.join('; ') || '—')}</td>
+      <td class="links">${links.join('')}</td>
+    </tr>`;
+  },
+
+  exportIssues() {
+    const rows = this.visibleRows();
+    const head = ['Issue', 'New since last run', 'Match warnings', 'NBI', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
+      'Historic Bridge ID', 'Historic Bridge name', 'Historic Bridge rating', 'County Survey #', 'County Survey name', 'County Survey rating',
+      'iTAP status', 'iTAP checked on', 'iTAP checked by', 'iTAP note', 'How matched', 'Latitude', 'Longitude', 'Historic Bridge SHAARD link', 'County Survey SHAARD link'];
+    const lines = [head, ...rows.map(r => {
+      const p = r.indot && r.indot.lat != null ? r.indot : (r.hb || r.sv);
+      return [CATEGORIES.find(c => c.key === r.cat).title, r.isNew ? 'Yes' : '', r.warn.join('; '),
+        r.indot?.nbi, r.indot?.kind, r.indot?.countyNo, r.indot?.linkRaw,
+        r.hb?.id, r.hb?.name, r.hb?.rating, r.sv?.id, r.sv?.name, r.sv?.rating,
+        r.itap?.raw, r.itap?.on, r.itap?.by, r.itap?.note, r.how.join('; '),
+        p?.lat?.toFixed(6), p?.lon?.toFixed(6), H.shaardUrl(r.hb?.id), H.shaardUrl(r.sv?.id)];
+    })].map(l => l.map(H.csvCell).join(','));
+    const tag = this.activeCat === 'all' ? 'all' : this.activeCat;
+    H.download(`bridge-status-${tag}-${H.today()}.csv`, lines.join('\r\n'));
+  },
+
+  // Every INDOT bridge, with what SHAARD says and any iTAP entries already loaded.
+  // This is the file to keep editing: fill iTAP Status, save as CSV, load back in.
+  downloadWorksheet() {
+    const order = { checkShaard: 0, notifyShaard: 1, verifyItap: 2, disagree: 3, ok: 4 };
+    const rows = this.rows.filter(r => r.indot).sort((a, b) => (order[a.cat] - order[b.cat]) || a.indot.nbi.localeCompare(b.indot.nbi));
+    const head = ['NBI', 'iTAP Status', 'Checked On', 'Checked By', 'Note', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
+      'Historic Bridge ID', 'Historic Bridge rating', 'County Survey #', 'County Survey rating', 'SHAARD says demolished?', 'Latitude', 'Longitude'];
+    const lines = [head, ...rows.map(r => {
+      const b = r.indot, it = r.itap;
+      const dem = [r.hb, r.sv].some(x => x?.status === 'demolished') ? 'Yes' : '';
+      return [b.nbi, it?.raw || '', it?.on || '', it?.by || '', it?.note || '', b.kind, b.countyNo, b.linkRaw,
+        r.hb?.id, r.hb?.rating, r.sv?.id, r.sv?.rating, dem, b.lat?.toFixed(6), b.lon?.toFixed(6)];
+    })].map(l => l.map(H.csvCell).join(','));
+    H.download(`itap_verified.csv`, lines.join('\r\n'));
+  }
+};
+
+App.init();
+</script>
+</body>
+</html>
