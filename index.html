@@ -218,8 +218,8 @@ const CONFIG = {
   // When this page is hosted on a website, a CSV with this name sitting next to it is
   // loaded automatically. Opened from a local folder, use the Load button instead.
   autoLoadCsv: 'itap_verified.csv',
-  // The deployed Cloudflare Worker from worker/, ending in /reviews. Blank = reviews off.
-  reviewsUrl: '',
+  // Where reviews are stored: the Pages Function in functions/reviews.js. Blank = reviews off.
+  reviewsUrl: 'https://bridge-status-checker.pages.dev/reviews',
   // Excel reader, loaded only when an .xlsx is picked.
   sheetJsUrl: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
 };
@@ -429,7 +429,7 @@ const Data = {
 };
 
 // =====================================================================
-// Match warning reviews, stored by the Worker in worker/
+// Match warning reviews, stored by functions/reviews.js
 // =====================================================================
 const Reviews = {
   data: {}, ready: false, queue: Promise.resolve(),
