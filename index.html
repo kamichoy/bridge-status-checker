@@ -23,6 +23,12 @@
   main { max-width: 1800px; margin: 0 auto; padding: 16px 20px 40px; }
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
   .panel h3 { margin: 0 0 10px; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+  .panel.compact { padding: 8px 12px; }
+  .panel.compact h3 { margin-bottom: 6px; }
+  /* Steps 1-3 side by side on wide screens, stacked otherwise */
+  .setup { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-bottom: 14px; }
+  .setup .panel { margin-bottom: 0; }
+  @media (min-width: 1000px) { .setup { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .btn { padding: 8px 14px; cursor: pointer; border: 1.5px solid var(--tool); background: white; color: var(--tool); border-radius: 6px; font-weight: 600; font-size: 13px; }
   .btn:hover { background: #eafbf1; }
@@ -30,15 +36,17 @@
   .btn.solid:hover { background: var(--tool-dark); }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .hint { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }
+  .hint summary { cursor: pointer; }
   .status-line { font-size: 13px; }
   .status-line.err { color: var(--danger); }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-  .card { border: 1.5px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; background: white; text-align: left; font: inherit; color: inherit; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+  .card { border: 1.5px solid var(--border); border-radius: 8px; padding: 5px 9px; cursor: pointer; background: white; text-align: left; font: inherit; color: inherit; }
   .card:hover { border-color: #b9c2cc; }
   .card.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(13,110,253,0.15); }
-  .card .n { font-size: 1.6em; font-weight: 700; }
-  .card .t { font-size: 12.5px; font-weight: 600; margin-top: 2px; }
-  .card .d { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; line-height: 1.35; }
+  .card .top { display: flex; align-items: center; gap: 8px; }
+  .card .n { font-size: 1.15em; font-weight: 700; }
+  .card .t { font-size: 11.5px; font-weight: 600; line-height: 1.25; }
+  .card .d { font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.3; }
   .card .new { font-size: 11px; color: var(--primary); font-weight: 600; }
   .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
   .toolbar input[type=search] { padding: 7px 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 13px; min-width: 240px; }
@@ -106,13 +114,14 @@
 </div>
 
 <main>
+  <div class="setup">
   <div class="panel">
     <h3>1. Live GIS data</h3>
     <div class="row">
       <button class="btn solid" id="btnReload" onclick="App.loadAll()">↻ Reload data</button>
       <span class="status-line" id="dataStatus">Not loaded yet.</span>
     </div>
-    <div class="hint">Data is read live from the state GIS services each time this page opens, so results always reflect the current records. Loading takes about 10–30 seconds.</div>
+    <details class="hint"><summary>How this works</summary>Data is read live from the state GIS services each time this page opens, so results always reflect the current records. Loading takes about 10–30 seconds.</details>
   </div>
 
   <div class="panel">
@@ -123,12 +132,12 @@
       <button class="btn" id="btnWorksheet" onclick="App.downloadWorksheet()" disabled>⬇️ Download iTAP worksheet</button>
       <span class="status-line" id="csvStatus">No iTAP file loaded.</span>
     </div>
-    <div class="hint">
+    <details class="hint"><summary>How this works</summary>
       The Select/Non-Select layers don't record demolitions, so the iTAP result for each bridge is kept in a CSV you maintain in Excel.
       <b>Download iTAP worksheet</b> gives you every INDOT bridge with what SHAARD currently says, plus any iTAP entries already loaded.
       Fill in the <b>iTAP Status</b> column (<i>Demolished</i>, <i>Standing</i> or <i>Unknown</i>; iTAP's own <i>Nonextant</i> / <i>Extant</i> wording also works), save as CSV, and load it back here. You can also load iTAP's <b>Search Results</b> export (.xlsx) directly, no conversion needed.
       Only the NBI, iTAP Status, Checked On, Checked By and Note columns are read; other columns are ignored.
-    </div>
+    </details>
   </div>
 
   <div class="panel">
@@ -137,14 +146,15 @@
       <button class="btn" id="btnToken" onclick="Reviews.askToken()">🔑 Enter access token</button>
       <span class="status-line" id="reviewStatus">Not connected.</span>
     </div>
-    <div class="hint">
+    <details class="hint"><summary>How this works</summary>
       For each row with a ⚠, record whether the records really are the same bridge. Reviews are saved online, so they stay when the page or the GIS data reloads.
       A review is cleared automatically if the row's records or its warnings change.
       <b>Export for SHAARD</b> lists the records whose status needs changing. A row with a warning is left out until it is reviewed as <i>Same bridge</i>.
-    </div>
+    </details>
+  </div>
   </div>
 
-  <div class="panel">
+  <div class="panel compact">
     <h3>4. Results</h3>
     <div class="cards" id="cards"></div>
   </div>
@@ -849,14 +859,13 @@ const App = {
     const counts = {}, newCounts = {};
     for (const r of this.rows) { counts[r.cat] = (counts[r.cat] || 0) + 1; if (r.isNew) newCounts[r.cat] = (newCounts[r.cat] || 0) + 1; }
     document.getElementById('cards').innerHTML = CATEGORIES.map(c => `
-      <button class="card ${this.activeCat === c.key ? 'active' : ''}" onclick="App.setCat('${c.key}')">
-        <div class="n">${counts[c.key] || 0}</div>
-        <div class="t"><span class="cat-dot" style="background:${c.color}"></span>${H.esc(c.title)}</div>
+      <button class="card ${this.activeCat === c.key ? 'active' : ''}" title="${H.esc(c.desc)}" onclick="App.setCat('${c.key}')">
+        <div class="top"><span class="n">${counts[c.key] || 0}</span>
+        <span class="t"><span class="cat-dot" style="background:${c.color}"></span>${H.esc(c.title)}</span></div>
         ${newCounts[c.key] ? `<div class="new">${newCounts[c.key]} new since ${H.esc(this.prevDate || 'last run')}</div>` : ''}
-        <div class="d">${H.esc(c.desc)}</div>
       </button>`).join('') + `
       <button class="card ${this.activeCat === 'all' ? 'active' : ''}" onclick="App.setCat('all')">
-        <div class="n">${this.rows.length}</div><div class="t">All compared</div>
+        <div class="top"><span class="n">${this.rows.length}</span><span class="t">All compared</span></div>
         <div class="d" id="warnSummary">${this.warnSummary()}</div>
       </button>`;
 
@@ -973,7 +982,7 @@ const App = {
       notifyShaard: { status: 'standing', request: 'Change the rating to Demolished' },
       checkShaard: { status: 'demolished', request: 'Check the Demolished rating' }
     };
-    const head = ['SHAARD ID', 'Layer', 'Name', 'Current rating', 'Requested', 'NBI', 'iTAP status', 'iTAP checked on', 'iTAP note', 'Review note', 'SHAARD link'];
+    const head = ['SHAARD ID', 'Layer', 'Name', 'Current rating', 'Requested', 'NBI', 'iTAP status', 'iTAP checked on', 'iTAP note', 'Review note'];
     const lines = [head];
     let held = 0;
     for (const r of this.rows) {
@@ -984,7 +993,7 @@ const App = {
       for (const x of [r.hb, r.sv]) {
         if (x?.status !== a.status) continue;
         lines.push([x.id, x.layer === 'hb' ? 'Historic Bridge' : 'County Survey', x.name, x.rating, a.request,
-          r.indot?.nbi, r.itap?.raw, r.itap?.on, r.itap?.note, rv?.note, H.shaardUrl(x.id)]);
+          r.indot?.nbi, r.itap?.raw, r.itap?.on, r.itap?.note, rv?.note]);
       }
     }
     const heldText = held ? `${held} row${held === 1 ? '' : 's'} left out until the warning is reviewed as Same bridge.` : '';
