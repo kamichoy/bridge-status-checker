@@ -89,6 +89,8 @@
   .issue { font-weight: 600; font-size: 12.5px; }
   .issue-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
   .warn { color: var(--warn); font-size: 11.5px; margin-top: 3px; }
+  .review { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .review select, .review input { font-size: 11.5px; padding: 3px 5px; border: 1px solid #ced4da; border-radius: 4px; max-width: 170px; }
   .tag-new { display: inline-block; background: var(--primary); color: white; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
   .links a { display: inline-block; margin: 0 6px 3px 0; font-size: 12px; color: var(--primary); text-decoration: none; white-space: nowrap; }
   .links a:hover { text-decoration: underline; }
@@ -130,7 +132,20 @@
   </div>
 
   <div class="panel">
-    <h3>3. Results</h3>
+    <h3>3. Match warning reviews</h3>
+    <div class="row">
+      <button class="btn" id="btnToken" onclick="Reviews.askToken()">🔑 Enter access token</button>
+      <span class="status-line" id="reviewStatus">Not connected.</span>
+    </div>
+    <div class="hint">
+      For each row with a ⚠, record whether the records really are the same bridge. Reviews are saved online, so they stay when the page or the GIS data reloads.
+      A review is cleared automatically if the row's records or its warnings change.
+      <b>Export for SHAARD</b> lists the records whose status needs changing. A row with a warning is left out until it is reviewed as <i>Same bridge</i>.
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>4. Results</h3>
     <div class="cards" id="cards"></div>
   </div>
 
@@ -138,8 +153,10 @@
     <div class="toolbar">
       <input type="search" id="search" placeholder="Filter by NBI, HB-, survey #, or name" oninput="App.render()">
       <label><input type="checkbox" id="warnOnly" onchange="App.render()"> Match warnings only</label>
+      <label><input type="checkbox" id="unreviewedOnly" onchange="App.render()"> Unreviewed warnings only</label>
       <label><input type="checkbox" id="newOnly" onchange="App.render()"> New since last run only</label>
       <button class="btn" id="btnExport" onclick="App.exportIssues()" disabled>📤 Export shown rows (CSV)</button>
+      <button class="btn" id="btnShaard" onclick="App.exportShaard()" disabled>📨 Export for SHAARD</button>
       <span class="count" id="count"></span>
     </div>
     <div class="split">
@@ -194,13 +211,15 @@ const CONFIG = {
   },
   // Two records with no shared ID are treated as the same bridge only if each is the
   // other's closest candidate AND they are within this distance.
-  matchRadiusMeters: 200,
+  matchRadiusFeet: 656,
   // An ID match whose two points are farther apart than this gets a warning (the ID or
   // one of the points is probably wrong).
-  idMatchFarMeters: 500,
+  idMatchFarFeet: 1640,
   // When this page is hosted on a website, a CSV with this name sitting next to it is
   // loaded automatically. Opened from a local folder, use the Load button instead.
   autoLoadCsv: 'itap_verified.csv',
+  // The deployed Cloudflare Worker from worker/, ending in /reviews. Blank = reviews off.
+  reviewsUrl: '',
   // Excel reader, loaded only when an .xlsx is picked.
   sheetJsUrl: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
 };
@@ -223,18 +242,27 @@ const CATEGORIES = [
     desc: 'Every source that has an answer agrees.' }
 ];
 
+const REVIEW_CHOICES = [
+  { key: '', label: 'Not reviewed' },
+  { key: 'same', label: 'Same bridge' },
+  { key: 'different', label: 'Not the same bridge' },
+  { key: 'unsure', label: 'Unsure' }
+];
+
 // =====================================================================
 // Helpers
 // =====================================================================
 const H = {
   esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
   today() { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; },
+  // Distance in feet.
   dist(a, b) {
-    const R = 6371000, r = Math.PI / 180;
+    const R = 20902231, r = Math.PI / 180;
     const dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(h));
   },
+  fmtDist(d) { return d >= 5280 ? (d / 5280).toFixed(1) + ' mi' : Math.round(d) + ' ft'; },
   // "Demolished" → demolished; blank / "Not Rated" → unknown; any real rating → standing.
   status(rating) {
     const r = String(rating || '').trim().toLowerCase();
@@ -335,14 +363,14 @@ class Grid {
     }
   }
   key(lat, lon) { return Math.floor(lat / this.cell) + ':' + Math.floor(lon / this.cell); }
-  // Every item within radiusM, closest first.
-  near(p, radiusM) {
-    const span = Math.ceil(radiusM / 800) + 1;   // 0.01° ≈ 800–1100 m in Indiana
+  // Every item within radiusFt, closest first.
+  near(p, radiusFt) {
+    const span = Math.ceil(radiusFt / 2600) + 1;   // 0.01° ≈ 2600–3600 ft in Indiana
     const bi = Math.floor(p.lat / this.cell), bj = Math.floor(p.lon / this.cell), out = [];
     for (let i = bi - span; i <= bi + span; i++) for (let j = bj - span; j <= bj + span; j++) {
       for (const it of this.map.get(i + ':' + j) || []) {
         const d = H.dist(p, it);
-        if (d <= radiusM) out.push({ it, d });
+        if (d <= radiusFt) out.push({ it, d });
       }
     }
     return out.sort((a, b) => a.d - b.d);
@@ -401,6 +429,55 @@ const Data = {
 };
 
 // =====================================================================
+// Match warning reviews, stored by the Worker in worker/
+// =====================================================================
+const Reviews = {
+  data: {}, ready: false, queue: Promise.resolve(),
+
+  token() { try { return localStorage.getItem('bridgeCheck.reviewToken') || ''; } catch (e) { return ''; } },
+  async askToken() {
+    const t = prompt('Access token for the review storage:', '');
+    if (t == null) return;
+    try { localStorage.setItem('bridgeCheck.reviewToken', t.trim()); } catch (e) { }
+    await this.load();
+    App.render();
+  },
+  async request(method, body) {
+    const r = await fetch(CONFIG.reviewsUrl, { method, body, cache: 'no-store', headers: { Authorization: 'Bearer ' + this.token() } });
+    if (r.status === 401) throw new Error('the access token was not accepted');
+    if (!r.ok) throw new Error(`HTTP ${r.status} from the review storage`);
+    return r.json();
+  },
+  // Every save replaces the whole document, so saving stays off unless the load worked.
+  // Otherwise a failed load would wipe the stored reviews.
+  async load() {
+    this.ready = false;
+    if (!CONFIG.reviewsUrl) { App.setStatus('reviewStatus', 'Not set up: reviewsUrl is blank in CONFIG.'); return; }
+    if (!this.token()) { App.setStatus('reviewStatus', 'Enter the access token to view and save reviews.'); return; }
+    try {
+      this.data = await this.request('GET');
+      this.ready = true;
+      App.setStatus('reviewStatus', `✓ ${Object.keys(this.data).length} saved review${Object.keys(this.data).length === 1 ? '' : 's'} loaded`);
+    } catch (e) {
+      console.error(e);
+      App.setStatus('reviewStatus', `Couldn't load the reviews: ${H.esc(e.message)}. Saving is off.`, true);
+    }
+  },
+  // Tied to the records and the warnings, not the issue category, so a review survives a
+  // status change but not a different match. Distances are dropped: they can shift slightly.
+  key(r) { return [r.indot?.nbiKey, r.hb?.id, r.sv?.id, ...r.warn.map(w => w.replace(/[\d.]+ (ft|mi)/g, '#'))].join('|'); },
+  get(r) { return this.data[this.key(r)] || null; },
+  // Saves run one at a time, each sending the latest data, so the last change always wins.
+  save(r, patch) {
+    const k = this.key(r), rec = { ...this.data[k], ...patch, on: H.today() };
+    if (rec.match || rec.note) this.data[k] = rec; else delete this.data[k];
+    this.queue = this.queue.then(() => this.request('PUT', JSON.stringify(this.data)))
+      .then(() => App.setStatus('reviewStatus', `✓ Saved ${new Date().toLocaleTimeString()}`))
+      .catch(e => { console.error(e); App.setStatus('reviewStatus', `Couldn't save the review: ${H.esc(e.message)}`, true); });
+  }
+};
+
+// =====================================================================
 // Matching
 // =====================================================================
 const Matcher = {
@@ -420,7 +497,7 @@ const Matcher = {
   },
 
   build(hbList, svList, indotList, itap) {
-    const R = CONFIG.matchRadiusMeters;
+    const R = CONFIG.matchRadiusFeet;
     const hbById = new Map(hbList.map(h => [h.id, h]));
     const svById = new Map(svList.map(s => [s.id, s]));
     const hbGrid = new Grid(hbList), svGrid = new Grid(svList);
@@ -444,20 +521,20 @@ const Matcher = {
         else row.warn.push(`Survey #${b.link.id} not found`);
       }
       // Fill the missing side from the HB⇄Survey pairing
-      if (row.hb && !row.sv && hbToSv.has(row.hb)) { const p = hbToSv.get(row.hb); row.sv = p.other; row.how.push(`Survey by distance (${Math.round(p.d)} m from HB)`); }
-      if (row.sv && !row.hb && svToHb.has(row.sv)) { const p = svToHb.get(row.sv); row.hb = p.other; row.how.push(`HB by distance (${Math.round(p.d)} m from survey)`); }
+      if (row.hb && !row.sv && hbToSv.has(row.hb)) { const p = hbToSv.get(row.hb); row.sv = p.other; row.how.push(`Survey by distance (${Math.round(p.d)} ft from HB)`); }
+      if (row.sv && !row.hb && svToHb.has(row.sv)) { const p = svToHb.get(row.sv); row.hb = p.other; row.how.push(`HB by distance (${Math.round(p.d)} ft from survey)`); }
       // No usable ID: fall back to distance from the INDOT point itself
       if (!row.hb && !row.sv && b.link.type === 'none' && b.lat != null) {
         const nh = hbGrid.near(b, R)[0], ns = svGrid.near(b, R)[0];
-        if (nh) { row.hb = nh.it; row.how.push(`HB by distance (${Math.round(nh.d)} m)`); }
-        if (ns) { row.sv = ns.it; row.how.push(`Survey by distance (${Math.round(ns.d)} m)`); }
-        if (!nh && !ns) row.how.push(`No ID on file; nothing within ${R} m`);
+        if (nh) { row.hb = nh.it; row.how.push(`HB by distance (${Math.round(nh.d)} ft)`); }
+        if (ns) { row.sv = ns.it; row.how.push(`Survey by distance (${Math.round(ns.d)} ft)`); }
+        if (!nh && !ns) row.how.push(`No ID on file; nothing within ${R} ft`);
       }
       // Sanity checks on the matches
       for (const rec of [row.hb, row.sv]) {
         if (rec && b.lat != null && rec.lat != null) {
           const d = H.dist(b, rec);
-          if (d > CONFIG.idMatchFarMeters) row.warn.push(`${rec.id} is ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m'} from the INDOT point`);
+          if (d > CONFIG.idMatchFarFeet) row.warn.push(`${rec.id} is ${H.fmtDist(d)} from the INDOT point`);
         }
       }
       if (row.hb) usedHb.add(row.hb);
@@ -469,7 +546,7 @@ const Matcher = {
     // Historic Bridge ⇄ Survey pairs that aren't in the INDOT inventory at all
     for (const [h, p] of hbToSv) {
       if (usedHb.has(h) || usedSv.has(p.other)) continue;
-      rows.push({ indot: null, hb: h, sv: p.other, how: [`HB ⇄ Survey by distance (${Math.round(p.d)} m)`], warn: [], itap: null });
+      rows.push({ indot: null, hb: h, sv: p.other, how: [`HB ⇄ Survey by distance (${Math.round(p.d)} ft)`], warn: [], itap: null });
     }
 
     for (const row of rows) {
@@ -512,7 +589,7 @@ const MapView = {
     const topo = esri('World_Topo_Map').addTo(map);
     const imagery = esri('World_Imagery', 'Maxar');
     L.control.layers({ 'Topographic': topo, 'Imagery': imagery }, null, { position: 'topright' }).addTo(map);
-    L.control.scale({ imperial: true, metric: true }).addTo(map);
+    L.control.scale({ imperial: true, metric: false }).addTo(map);
     this.dots = L.layerGroup().addTo(map);
     this.sel = L.layerGroup().addTo(map);
 
@@ -588,15 +665,16 @@ const MapView = {
     const bounds = L.latLngBounds(ll);
     // From the table, or from a dot clicked while zoomed out, go to the bridge.
     if (zoom || this.map.getZoom() < 14 || !this.map.getBounds().contains(bounds)) {
-      if (ll.length === 1 || bounds.getNorthEast().distanceTo(bounds.getSouthWest()) < 30) this.map.setView(ll[0], 17, { animate: false });
+      const ne = bounds.getNorthEast(), sw = bounds.getSouthWest();
+      if (ll.length === 1 || H.dist({ lat: ne.lat, lon: ne.lng }, { lat: sw.lat, lon: sw.lng }) < 100) this.map.setView(ll[0], 17, { animate: false });
       else this.map.fitBounds(bounds.pad(0.35), { maxZoom: 18, animate: false });
     }
 
     for (let i = 0; i < recs.length; i++) for (let j = i + 1; j < recs.length; j++) {
       const a = recs[i].p, b = recs[j].p, d = H.dist(a, b);
-      if (d < 1) continue;
-      const far = d > CONFIG.idMatchFarMeters;
-      const txt = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m';
+      if (d < 3) continue;
+      const far = d > CONFIG.idMatchFarFeet;
+      const txt = H.fmtDist(d);
       // Keep the label on screen only when the two pins are far enough apart not to be covered by it.
       const px = this.map.latLngToContainerPoint([a.lat, a.lon]).distanceTo(this.map.latLngToContainerPoint([b.lat, b.lon]));
       L.polyline([[a.lat, a.lon], [b.lat, b.lon]], { color: far ? '#dc3545' : '#333', weight: 2, dashArray: '5 5', opacity: 0.85 })
@@ -604,7 +682,7 @@ const MapView = {
         .addTo(this.sel);
     }
     for (const x of recs) {
-      const others = recs.filter(y => y !== x).map(y => { const d = H.dist(x.p, y.p); return `${y.letter}: ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m'} away`; });
+      const others = recs.filter(y => y !== x).map(y => { const d = H.dist(x.p, y.p); return `${y.letter}: ${H.fmtDist(d)} away`; });
       L.marker([x.p.lat, x.p.lon], { icon: this.pin(x.letter, x.status, x.sq), zIndexOffset: 1000 })
         .bindPopup(`<div style="font-size:12.5px;line-height:1.5">${x.html}${others.length ? '<br><span style="color:#8a94a3">' + others.join(' · ') + '</span>' : ''}</div>`).addTo(this.sel);
     }
@@ -621,6 +699,7 @@ const App = {
 
   async init() {
     MapView.init();
+    await Reviews.load();
     await this.loadAll();
     // Hosted copy: pick up a CSV published next to this page, if there is one.
     if (!this.itapSource && location.protocol.startsWith('http')) {
@@ -759,6 +838,7 @@ const App = {
     try { localStorage.setItem('bridgeCheck.lastIssues', JSON.stringify({ date: new Date().toLocaleDateString(), keys: issues })); } catch (e) { }
     for (const r of this.rows) r.isNew = !!(this.prevKeys && r.cat !== 'ok' && !this.prevKeys.has(r.key));
     document.getElementById('btnExport').disabled = false;
+    document.getElementById('btnShaard').disabled = false;
     this.render();
   },
 
@@ -768,7 +848,6 @@ const App = {
     // Cards
     const counts = {}, newCounts = {};
     for (const r of this.rows) { counts[r.cat] = (counts[r.cat] || 0) + 1; if (r.isNew) newCounts[r.cat] = (newCounts[r.cat] || 0) + 1; }
-    const warnN = this.rows.filter(r => r.warn.length).length;
     document.getElementById('cards').innerHTML = CATEGORIES.map(c => `
       <button class="card ${this.activeCat === c.key ? 'active' : ''}" onclick="App.setCat('${c.key}')">
         <div class="n">${counts[c.key] || 0}</div>
@@ -778,7 +857,7 @@ const App = {
       </button>`).join('') + `
       <button class="card ${this.activeCat === 'all' ? 'active' : ''}" onclick="App.setCat('all')">
         <div class="n">${this.rows.length}</div><div class="t">All compared</div>
-        <div class="d">${warnN} with a match warning (⚠) worth a second look.</div>
+        <div class="d" id="warnSummary">${this.warnSummary()}</div>
       </button>`;
 
     // Table
@@ -791,6 +870,18 @@ const App = {
     tb.innerHTML = rows.slice(0, MAX).map(r => this.rowHtml(r)).join('') +
       (rows.length > MAX ? `<tr><td colspan="7" class="empty">Showing the first ${MAX}. Narrow the filter, or use Export to get every row.</td></tr>` : '');
     if (this.selected != null) this.markRow(this.selected, false);
+  },
+
+  warnSummary() {
+    const warned = this.rows.filter(r => r.warn.length);
+    return `${warned.length} with a match warning (⚠), ${warned.filter(r => !Reviews.get(r)?.match).length} not reviewed yet.`;
+  },
+
+  setReview(idx, patch) {
+    Reviews.save(this.rows[idx], patch);
+    document.getElementById('warnSummary').textContent = this.warnSummary();
+    // Only redraw when the row should drop out of the view; a redraw loses the cursor.
+    if (document.getElementById('unreviewedOnly').checked) this.render();
   },
 
   // A bridge picked on the map or in the table: ring its row, draw its records.
@@ -812,9 +903,11 @@ const App = {
   visibleRows() {
     const q = document.getElementById('search').value.trim().toLowerCase();
     const warnOnly = document.getElementById('warnOnly').checked, newOnly = document.getElementById('newOnly').checked;
+    const unreviewedOnly = document.getElementById('unreviewedOnly').checked;
     return this.rows.filter(r => {
       if (this.activeCat !== 'all' && r.cat !== this.activeCat) return false;
       if (warnOnly && !r.warn.length) return false;
+      if (unreviewedOnly && (!r.warn.length || Reviews.get(r)?.match)) return false;
       if (newOnly && !r.isNew) return false;
       if (q) {
         const hay = [r.indot?.nbi, r.indot?.linkRaw, r.indot?.countyNo, r.hb?.id, r.hb?.name, r.sv?.id, r.sv?.name].join(' ').toLowerCase();
@@ -826,6 +919,14 @@ const App = {
 
   badge(status, label) { return `<span class="badge b-${status}">${H.esc(label || status)}</span>`; },
 
+  reviewHtml(r) {
+    if (!r.warn.length) return '';
+    const v = Reviews.get(r), off = Reviews.ready ? '' : ' disabled';
+    const opts = REVIEW_CHOICES.map(c => `<option value="${c.key}"${(v?.match || '') === c.key ? ' selected' : ''}>${H.esc(c.label)}</option>`).join('');
+    return `<div class="review"><select${off} onchange="App.setReview(${r.idx}, { match: this.value })">${opts}</select>
+      <input type="text"${off} placeholder="Review note" maxlength="500" value="${H.esc(v?.note)}" onchange="App.setReview(${r.idx}, { note: this.value })"></div>`;
+  },
+
   rowHtml(r) {
     const cat = CATEGORIES.find(c => c.key === r.cat);
     const rec = x => x ? `<div class="id">${H.esc(x.id)}</div><div class="name">${H.esc(x.name)}</div>${this.badge(x.status, x.rating || 'No rating')}` : '<span class="muted">—</span>';
@@ -835,8 +936,8 @@ const App = {
     if (r.hb) links.push(`<a href="${H.shaardUrl(r.hb.id)}" target="_blank" rel="noopener">SHAARD ${H.esc(r.hb.id)}</a>`);
     if (r.sv) links.push(`<a href="${H.shaardUrl(r.sv.id)}" target="_blank" rel="noopener">SHAARD survey</a>`);
     if (p && p.lat != null) links.push(`<a href="${H.mapUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Map</a>`, `<a href="${H.svUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Street View</a>`);
-    return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a'))App.select(${r.idx},'table')">
-      <td><div class="issue"><span class="cat-dot" style="background:${cat.color}"></span>${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}</td>
+    return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a,select,input'))App.select(${r.idx},'table')">
+      <td><div class="issue"><span class="cat-dot" style="background:${cat.color}"></span>${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}${this.reviewHtml(r)}</td>
       <td>${b ? `<div class="id">NBI ${H.esc(b.nbi)}</div><div class="name">${H.esc(b.kind)}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>${b.linkRaw ? `<div class="name">On file: ${H.esc(b.linkRaw)}</div>` : ''}` : '<span class="muted">Not in INDOT inventory</span>'}</td>
       <td>${rec(r.hb)}</td>
       <td>${rec(r.sv)}</td>
@@ -848,12 +949,14 @@ const App = {
 
   exportIssues() {
     const rows = this.visibleRows();
-    const head = ['Issue', 'New since last run', 'Match warnings', 'NBI', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
+    const head = ['Issue', 'New since last run', 'Match warnings', 'Match review', 'Review note', 'NBI', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
       'Historic Bridge ID', 'Historic Bridge name', 'Historic Bridge rating', 'County Survey #', 'County Survey name', 'County Survey rating',
       'iTAP status', 'iTAP checked on', 'iTAP checked by', 'iTAP note', 'How matched', 'Latitude', 'Longitude', 'Historic Bridge SHAARD link', 'County Survey SHAARD link'];
     const lines = [head, ...rows.map(r => {
       const p = r.indot && r.indot.lat != null ? r.indot : (r.hb || r.sv);
+      const rv = r.warn.length ? Reviews.get(r) : null;
       return [CATEGORIES.find(c => c.key === r.cat).title, r.isNew ? 'Yes' : '', r.warn.join('; '),
+        REVIEW_CHOICES.find(c => c.key === rv?.match)?.label, rv?.note,
         r.indot?.nbi, r.indot?.kind, r.indot?.countyNo, r.indot?.linkRaw,
         r.hb?.id, r.hb?.name, r.hb?.rating, r.sv?.id, r.sv?.name, r.sv?.rating,
         r.itap?.raw, r.itap?.on, r.itap?.by, r.itap?.note, r.how.join('; '),
@@ -861,6 +964,33 @@ const App = {
     })].map(l => l.map(H.csvCell).join(','));
     const tag = this.activeCat === 'all' ? 'all' : this.activeCat;
     H.download(`bridge-status-${tag}-${H.today()}.csv`, lines.join('\r\n'));
+  },
+
+  // One line per SHAARD record to act on. A row with a match warning goes out only once
+  // it is reviewed as the same bridge, so a bad match can't get the wrong record changed.
+  exportShaard() {
+    const ask = {
+      notifyShaard: { status: 'standing', request: 'Change the rating to Demolished' },
+      checkShaard: { status: 'demolished', request: 'Check the Demolished rating' }
+    };
+    const head = ['SHAARD ID', 'Layer', 'Name', 'Current rating', 'Requested', 'NBI', 'iTAP status', 'iTAP checked on', 'iTAP note', 'Review note', 'SHAARD link'];
+    const lines = [head];
+    let held = 0;
+    for (const r of this.rows) {
+      const a = ask[r.cat];
+      if (!a) continue;
+      const rv = r.warn.length ? Reviews.get(r) : null;
+      if (r.warn.length && rv?.match !== 'same') { held++; continue; }
+      for (const x of [r.hb, r.sv]) {
+        if (x?.status !== a.status) continue;
+        lines.push([x.id, x.layer === 'hb' ? 'Historic Bridge' : 'County Survey', x.name, x.rating, a.request,
+          r.indot?.nbi, r.itap?.raw, r.itap?.on, r.itap?.note, rv?.note, H.shaardUrl(x.id)]);
+      }
+    }
+    const heldText = held ? `${held} row${held === 1 ? '' : 's'} left out until the warning is reviewed as Same bridge.` : '';
+    if (lines.length === 1) { this.setStatus('reviewStatus', `Nothing to export. ${heldText}`); return; }
+    H.download(`shaard-status-changes-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
+    this.setStatus('reviewStatus', `✓ Exported ${lines.length - 1} SHAARD record${lines.length === 2 ? '' : 's'}. ${heldText}`);
   },
 
   // Every INDOT bridge, with what SHAARD says and any iTAP entries already loaded.
