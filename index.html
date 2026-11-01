@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bridge Status Checker</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   :root {
     --primary: #0d6efd; --tool: #0b9e3f; --tool-dark: #098434;
@@ -18,7 +20,7 @@
   .top-bar h1 { margin: 0; font-size: 1.25em; }
   .top-bar .subtitle { font-size: 0.8em; color: var(--text-muted); }
   .top-bar a { margin-left: auto; font-size: 0.85em; color: var(--primary); }
-  main { max-width: 1400px; margin: 0 auto; padding: 16px 20px 40px; }
+  main { max-width: 1800px; margin: 0 auto; padding: 16px 20px 40px; }
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
   .panel h3 { margin: 0 0 10px; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
@@ -47,6 +49,37 @@
   th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); border-bottom: 2px solid var(--border); padding: 8px 8px; white-space: nowrap; }
   td { border-bottom: 1px solid var(--border); padding: 8px 8px; vertical-align: top; }
   tr:hover td { background: #fafbfc; }
+  tbody tr[data-idx] { cursor: pointer; }
+  tr.sel td { background: #eef4ff !important; }
+  tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
+  .cat-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+
+  /* Map + table side by side on wide screens, stacked otherwise */
+  .split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .map-wrap { position: relative; }
+  #map { height: 420px; border: 1px solid var(--border); border-radius: 8px; background: #e9eef2; }
+  @media (min-width: 1200px) {
+    .split { grid-template-columns: minmax(0, 1fr) minmax(420px, 40%); }
+    .split .map-wrap { order: 2; }
+    .map-wrap .sticky { position: sticky; top: 12px; }
+    #map { height: calc(100vh - 110px); min-height: 460px; }
+    .table-wrap { max-height: calc(100vh - 110px); min-height: 460px; overflow: auto; }
+    thead th { position: sticky; top: 0; background: white; z-index: 1; }
+  }
+  .map-note { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.45; }
+  .legend { background: white; padding: 8px 10px; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.2); font-size: 11.5px; line-height: 1.7; color: var(--text); }
+  .legend b { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-top: 4px; }
+  .legend summary { cursor: pointer; font-weight: 700; font-size: 11.5px; }
+  .legend details[open] summary { margin-bottom: 4px; }
+  .legend .pin { margin-right: 6px; transform: scale(0.85); vertical-align: middle; }
+  .pin { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; color: white; font: 700 12px/1 -apple-system, "Segoe UI", sans-serif; border: 2px solid white; box-shadow: 0 1px 4px rgba(0,0,0,0.45); }
+  .pin.sq { border-radius: 5px; }
+  .pin.demolished { background: var(--demolished); }
+  .pin.standing { background: var(--standing); }
+  .pin.unknown { background: #9aa4b1; }
+  .dist-label { background: rgba(255,255,255,0.92); border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3); font-size: 11px; font-weight: 600; padding: 1px 5px; }
+  .dist-label::before { display: none; }
+  .map-fallback { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center; }
   .id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
   .name { color: var(--text-muted); font-size: 12px; }
   .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; color: white; white-space: nowrap; }
@@ -91,7 +124,7 @@
     <div class="hint">
       The Select/Non-Select layers don't record demolitions, so the iTAP result for each bridge is kept in a CSV you maintain in Excel.
       <b>Download iTAP worksheet</b> gives you every INDOT bridge with what SHAARD currently says, plus any iTAP entries already loaded.
-      Fill in the <b>iTAP Status</b> column (<i>Demolished</i> or <i>Standing</i>; iTAP's own <i>Nonextant</i> / <i>Extant</i> wording also works), save as CSV, and load it back here. You can also load iTAP's <b>Search Results</b> export (.xlsx) directly, no conversion needed.
+      Fill in the <b>iTAP Status</b> column (<i>Demolished</i>, <i>Standing</i> or <i>Unknown</i>; iTAP's own <i>Nonextant</i> / <i>Extant</i> wording also works), save as CSV, and load it back here. You can also load iTAP's <b>Search Results</b> export (.xlsx) directly, no conversion needed.
       Only the NBI, iTAP Status, Checked On, Checked By and Note columns are read; other columns are ignored.
     </div>
   </div>
@@ -109,6 +142,11 @@
       <button class="btn" id="btnExport" onclick="App.exportIssues()" disabled>📤 Export shown rows (CSV)</button>
       <span class="count" id="count"></span>
     </div>
+    <div class="split">
+    <div class="map-wrap"><div class="sticky">
+      <div id="map"></div>
+      <div class="map-note">Dots show the rows in the current view, colored by issue (a dark ring = match warning). Click a dot or a table row to see that bridge's records: <b>I</b> INDOT, <b>H</b> Historic Bridge, <b>S</b> County Survey, colored by what each source says, with the distance between them.</div>
+    </div></div>
     <div class="table-wrap">
       <table>
         <thead><tr>
@@ -116,6 +154,7 @@
         </tr></thead>
         <tbody id="tbody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
       </table>
+    </div>
     </div>
   </div>
 </main>
@@ -170,15 +209,17 @@ const CONFIG = {
 // Issue categories, in the order a row is tested against them.
 // =====================================================================
 const CATEGORIES = [
-  { key: 'notifyShaard', title: 'iTAP: demolished, SHAARD not updated',
+  { key: 'notifyShaard', color: '#dc3545', title: 'iTAP: demolished, SHAARD not updated',
     desc: 'iTAP confirms the bridge is gone but a SHAARD record still rates it as standing. Send to SHAARD staff.' },
-  { key: 'checkShaard', title: 'iTAP: standing, SHAARD says demolished',
+  { key: 'checkShaard', color: '#fd7e14', title: 'iTAP: standing, SHAARD says demolished',
     desc: 'iTAP shows the bridge in service but a SHAARD record rates it Demolished. One of them is wrong.' },
-  { key: 'disagree', title: 'Historic Bridge vs Survey disagree',
+  { key: 'itapUnknown', color: '#d4a017', title: 'iTAP: status unknown',
+    desc: 'The bridge is in iTAP, but its status there is Unknown. Check iTAP\'s Additional Information notes, imagery or the county to settle it.' },
+  { key: 'disagree', color: '#6f42c1', title: 'Historic Bridge vs Survey disagree',
     desc: 'The two SHAARD layers give different answers and iTAP has not been checked.' },
-  { key: 'verifyItap', title: 'Verify in iTAP',
+  { key: 'verifyItap', color: '#0d6efd', title: 'Verify in iTAP',
     desc: 'Still in the INDOT inventory, but SHAARD says demolished. Look it up in iTAP and record the result.' },
-  { key: 'ok', title: 'Consistent',
+  { key: 'ok', color: '#9fb8a6', title: 'Consistent',
     desc: 'Every source that has an answer agrees.' }
 ];
 
@@ -207,6 +248,7 @@ const H = {
     // iTAP's own wording: "Nonextant" = gone; "Extant - vehicular / pedestrian service"
     // and "Extant - not in service" = still physically there. Test the "non" forms first,
     // since "nonextant" also contains "extant".
+    if (/unknown|undetermined|not determined|unverified/.test(r)) return 'unknown';
     if (/non-?\s*extant|not extant|demolish|replaced|removed|gone|razed/.test(r)) return 'demolished';
     if (/stand|extant|in service|open|exist|present/.test(r)) return 'standing';
     return null;
@@ -445,11 +487,128 @@ const Matcher = {
     const anyDem = shaard.some(r => r.status === 'demolished');
     const anyStand = shaard.some(r => r.status === 'standing');
     const it = row.itap?.status;
+    if (it === 'unknown') return row.indot ? 'itapUnknown' : 'ok';
     if (it === 'demolished' && anyStand) return 'notifyShaard';
     if (it === 'standing' && anyDem) return 'checkShaard';
     if (!it && anyDem && anyStand) return 'disagree';
     if (!it && anyDem && row.indot) return 'verifyItap';
     return 'ok';
+  }
+};
+
+// =====================================================================
+// Map
+// =====================================================================
+const MapView = {
+  map: null, dots: null, sel: null, lastKey: '',
+
+  init() {
+    if (!window.L) {
+      document.getElementById('map').innerHTML = '<div class="map-fallback">The map couldn\'t load (it needs internet access to cdnjs and Esri basemaps). Everything else on the page still works.</div>';
+      return;
+    }
+    const map = this.map = L.map('map', { preferCanvas: true, zoomSnap: 0.5 }).setView([39.85, -86.2], 7);
+    const esri = (svc, label) => L.tileLayer(`https://server.arcgisonline.com/ArcGIS/rest/services/${svc}/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19, maxNativeZoom: 19, attribution: 'Basemap © Esri' + (label ? ', ' + label : '') });
+    const topo = esri('World_Topo_Map').addTo(map);
+    const imagery = esri('World_Imagery', 'Maxar');
+    L.control.layers({ 'Topographic': topo, 'Imagery': imagery }, null, { position: 'topright' }).addTo(map);
+    L.control.scale({ imperial: true, metric: true }).addTo(map);
+    this.dots = L.layerGroup().addTo(map);
+    this.sel = L.layerGroup().addTo(map);
+
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = () => {
+      const d = L.DomUtil.create('div', 'legend');
+      d.innerHTML = `<details${window.innerWidth >= 1200 ? ' open' : ''}><summary>Legend</summary>` + '<b>Issue</b>' + CATEGORIES.map(c => `<div><span class="cat-dot" style="background:${c.color}"></span>${H.esc(c.title)}</div>`).join('') +
+        '<b>Selected bridge</b>' +
+        `<div><span class="pin sq unknown">I</span>INDOT (colored by iTAP)</div>` +
+        `<div><span class="pin unknown">H</span>Historic Bridge</div>` +
+        `<div><span class="pin unknown">S</span>County Survey</div>` +
+        `<div><span class="cat-dot" style="background:var(--demolished)"></span>Demolished <span class="cat-dot" style="background:var(--standing);margin-left:8px"></span>Standing <span class="cat-dot" style="background:#9aa4b1;margin-left:8px"></span>Unknown</div></details>`;
+      L.DomEvent.disableClickPropagation(d);
+      return d;
+    };
+    legend.addTo(map);
+    map.on('click', () => { this.sel.clearLayers(); App.selected = null; App.markRow(-1); });
+  },
+
+  point(r) {
+    for (const p of [r.indot, r.hb, r.sv]) if (p && p.lat != null && p.lon != null) return p;
+    return null;
+  },
+
+  // Redraw the dots for the rows in the current view; refit only when the view changed.
+  update(rows) {
+    if (!this.map) return;
+    this.dots.clearLayers();
+    const cat = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
+    const pts = [];
+    // Consistent rows underneath, issues on top
+    const ordered = [...rows].sort((a, b) => (a.cat === 'ok') - (b.cat === 'ok')).reverse();
+    for (const r of ordered) {
+      const p = this.point(r);
+      if (!p) continue;
+      pts.push([p.lat, p.lon]);
+      const label = r.indot ? `NBI ${r.indot.nbi}` : (r.hb?.id || r.sv?.id);
+      L.circleMarker([p.lat, p.lon], {
+        radius: r.cat === 'ok' ? 4 : 6, color: r.warn.length ? '#222' : '#fff', weight: r.warn.length ? 2 : 1,
+        fillColor: cat[r.cat].color, fillOpacity: 0.9
+      }).bindTooltip(`${H.esc(label)} · ${H.esc(cat[r.cat].title)}${r.warn.length ? ' · ⚠' : ''}`)
+        .on('click', e => { L.DomEvent.stop(e); App.select(r.idx, 'map'); })
+        .addTo(this.dots);
+    }
+    const key = rows.length + ':' + (rows[0]?.idx ?? '') + ':' + (rows[rows.length - 1]?.idx ?? '');
+    if (key !== this.lastKey) {
+      this.lastKey = key;
+      if (pts.length) this.map.fitBounds(L.latLngBounds(pts).pad(0.05), { maxZoom: 15 });
+    }
+    if (App.selected == null) this.sel.clearLayers();
+  },
+
+  pin(letter, status, square) {
+    return L.divIcon({ className: '', html: `<span class="pin ${square ? 'sq ' : ''}${status}">${letter}</span>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+  },
+
+  // The selected bridge: one pin per source record, dashed lines with distances between them.
+  showSelection(r, zoom) {
+    if (!this.map) return;
+    this.sel.clearLayers();
+    this.dots.eachLayer(l => l.closeTooltip());
+    const recs = [];
+    if (r.indot && r.indot.lat != null) recs.push({ p: r.indot, letter: 'I', sq: true, status: r.itap?.status || 'unknown',
+      html: `<b>INDOT ${H.esc(r.indot.kind)} · NBI ${H.esc(r.indot.nbi)}</b><br>On file: ${H.esc(r.indot.linkRaw || '—')}<br>iTAP: ${H.esc(r.itap ? (r.itap.raw || r.itap.status) : 'not checked')}` });
+    if (r.hb && r.hb.lat != null) recs.push({ p: r.hb, letter: 'H', status: r.hb.status,
+      html: `<b>Historic Bridge ${H.esc(r.hb.id)}</b><br>${H.esc(r.hb.name)}<br>Rating: ${H.esc(r.hb.rating || 'none')}` });
+    if (r.sv && r.sv.lat != null) recs.push({ p: r.sv, letter: 'S', status: r.sv.status,
+      html: `<b>County Survey ${H.esc(r.sv.id)}</b><br>${H.esc(r.sv.name)}<br>Rating: ${H.esc(r.sv.rating || 'none')}` });
+    if (!recs.length) return;
+
+    // Frame the bridge first (no animation), so label placement below uses the final zoom.
+    const ll = recs.map(x => [x.p.lat, x.p.lon]);
+    const bounds = L.latLngBounds(ll);
+    // From the table, or from a dot clicked while zoomed out, go to the bridge.
+    if (zoom || this.map.getZoom() < 14 || !this.map.getBounds().contains(bounds)) {
+      if (ll.length === 1 || bounds.getNorthEast().distanceTo(bounds.getSouthWest()) < 30) this.map.setView(ll[0], 17, { animate: false });
+      else this.map.fitBounds(bounds.pad(0.35), { maxZoom: 18, animate: false });
+    }
+
+    for (let i = 0; i < recs.length; i++) for (let j = i + 1; j < recs.length; j++) {
+      const a = recs[i].p, b = recs[j].p, d = H.dist(a, b);
+      if (d < 1) continue;
+      const far = d > CONFIG.idMatchFarMeters;
+      const txt = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m';
+      // Keep the label on screen only when the two pins are far enough apart not to be covered by it.
+      const px = this.map.latLngToContainerPoint([a.lat, a.lon]).distanceTo(this.map.latLngToContainerPoint([b.lat, b.lon]));
+      L.polyline([[a.lat, a.lon], [b.lat, b.lon]], { color: far ? '#dc3545' : '#333', weight: 2, dashArray: '5 5', opacity: 0.85 })
+        .bindTooltip(`${recs[i].letter}–${recs[j].letter}: ${txt}`, { permanent: px > 90, direction: 'center', className: 'dist-label', sticky: px <= 90 })
+        .addTo(this.sel);
+    }
+    for (const x of recs) {
+      const others = recs.filter(y => y !== x).map(y => { const d = H.dist(x.p, y.p); return `${y.letter}: ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m'} away`; });
+      L.marker([x.p.lat, x.p.lon], { icon: this.pin(x.letter, x.status, x.sq), zIndexOffset: 1000 })
+        .bindPopup(`<div style="font-size:12.5px;line-height:1.5">${x.html}${others.length ? '<br><span style="color:#8a94a3">' + others.join(' · ') + '</span>' : ''}</div>`).addTo(this.sel);
+    }
+    if (zoom) document.getElementById('map').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 };
 
@@ -461,6 +620,7 @@ const App = {
   rows: [], activeCat: 'notifyShaard', prevKeys: null,
 
   async init() {
+    MapView.init();
     await this.loadAll();
     // Hosted copy: pick up a CSV published next to this page, if there is one.
     if (!this.itapSource && location.protocol.startsWith('http')) {
@@ -574,7 +734,8 @@ const App = {
     this.itap = map; this.itapSource = sourceName;
     const known = new Set(this.indot.map(b => b.nbiKey));
     const unknown = this.indot.length ? [...map.keys()].filter(k => !known.has(k)) : [];
-    let msg = `✓ ${H.esc(sourceName)}: ${map.size} bridge${map.size === 1 ? '' : 's'} with an iTAP status`;
+    const nUnk = [...map.values()].filter(v => v.status === 'unknown').length;
+    let msg = `✓ ${H.esc(sourceName)}: ${map.size} bridge${map.size === 1 ? '' : 's'} with an iTAP status${nUnk ? ` (${nUnk} Unknown)` : ''}`;
     if (unknown.length) msg += ` · ${unknown.length} of them aren't in the Select/Non-Select layers and are ignored`;
     if (bad.length) msg += ` · ⚠ ${bad.length} unreadable status value${bad.length === 1 ? '' : 's'} skipped: ${H.esc(bad.slice(0, 3).join('; '))}${bad.length > 3 ? '…' : ''}`;
     this.setStatus('csvStatus', msg, false);
@@ -585,6 +746,8 @@ const App = {
   // loaded data. Kept in this browser only; purely a convenience.
   recompute(freshLoad) {
     this.rows = Matcher.build(this.hb, this.sv, this.indot, this.itap);
+    this.rows.forEach((r, i) => { r.idx = i; });
+    this.selected = null;
     const issues = this.rows.filter(r => r.cat !== 'ok').map(r => r.key);
     if (freshLoad) {
       try {
@@ -609,7 +772,7 @@ const App = {
     document.getElementById('cards').innerHTML = CATEGORIES.map(c => `
       <button class="card ${this.activeCat === c.key ? 'active' : ''}" onclick="App.setCat('${c.key}')">
         <div class="n">${counts[c.key] || 0}</div>
-        <div class="t">${H.esc(c.title)}</div>
+        <div class="t"><span class="cat-dot" style="background:${c.color}"></span>${H.esc(c.title)}</div>
         ${newCounts[c.key] ? `<div class="new">${newCounts[c.key]} new since ${H.esc(this.prevDate || 'last run')}</div>` : ''}
         <div class="d">${H.esc(c.desc)}</div>
       </button>`).join('') + `
@@ -622,10 +785,28 @@ const App = {
     const rows = this.visibleRows();
     document.getElementById('count').textContent = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
     const tb = document.getElementById('tbody');
+    MapView.update(rows);
     if (!rows.length) { tb.innerHTML = `<tr><td colspan="7" class="empty">${this.rows.length ? 'Nothing in this view.' : 'Loading…'}</td></tr>`; return; }
     const MAX = 1500;
     tb.innerHTML = rows.slice(0, MAX).map(r => this.rowHtml(r)).join('') +
       (rows.length > MAX ? `<tr><td colspan="7" class="empty">Showing the first ${MAX}. Narrow the filter, or use Export to get every row.</td></tr>` : '');
+    if (this.selected != null) this.markRow(this.selected, false);
+  },
+
+  // A bridge picked on the map or in the table: ring its row, draw its records.
+  select(idx, from) {
+    const r = this.rows[idx];
+    if (!r) return;
+    this.selected = idx;
+    this.markRow(idx, from === 'map');
+    MapView.showSelection(r, from === 'table');
+  },
+  markRow(idx, scroll) {
+    document.querySelectorAll('#tbody tr.sel').forEach(tr => tr.classList.remove('sel'));
+    const tr = document.querySelector(`#tbody tr[data-idx="${idx}"]`);
+    if (!tr) return;
+    tr.classList.add('sel');
+    if (scroll) tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
   },
 
   visibleRows() {
@@ -654,8 +835,8 @@ const App = {
     if (r.hb) links.push(`<a href="${H.shaardUrl(r.hb.id)}" target="_blank" rel="noopener">SHAARD ${H.esc(r.hb.id)}</a>`);
     if (r.sv) links.push(`<a href="${H.shaardUrl(r.sv.id)}" target="_blank" rel="noopener">SHAARD survey</a>`);
     if (p && p.lat != null) links.push(`<a href="${H.mapUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Map</a>`, `<a href="${H.svUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Street View</a>`);
-    return `<tr>
-      <td><div class="issue">${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}</td>
+    return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a'))App.select(${r.idx},'table')">
+      <td><div class="issue"><span class="cat-dot" style="background:${cat.color}"></span>${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}</td>
       <td>${b ? `<div class="id">NBI ${H.esc(b.nbi)}</div><div class="name">${H.esc(b.kind)}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>${b.linkRaw ? `<div class="name">On file: ${H.esc(b.linkRaw)}</div>` : ''}` : '<span class="muted">Not in INDOT inventory</span>'}</td>
       <td>${rec(r.hb)}</td>
       <td>${rec(r.sv)}</td>
@@ -685,7 +866,7 @@ const App = {
   // Every INDOT bridge, with what SHAARD says and any iTAP entries already loaded.
   // This is the file to keep editing: fill iTAP Status, save as CSV, load back in.
   downloadWorksheet() {
-    const order = { checkShaard: 0, notifyShaard: 1, verifyItap: 2, disagree: 3, ok: 4 };
+    const order = { checkShaard: 0, notifyShaard: 1, itapUnknown: 2, verifyItap: 3, disagree: 4, ok: 5 };
     const rows = this.rows.filter(r => r.indot).sort((a, b) => (order[a.cat] - order[b.cat]) || a.indot.nbi.localeCompare(b.indot.nbi));
     const head = ['NBI', 'iTAP Status', 'Checked On', 'Checked By', 'Note', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
       'Historic Bridge ID', 'Historic Bridge rating', 'County Survey #', 'County Survey rating', 'SHAARD says demolished?', 'Latitude', 'Longitude'];
