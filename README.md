@@ -73,7 +73,9 @@ Changing a status in SHAARD does not clear a warning. Warnings come from IDs, co
 
 ## Reviews
 
-Each row with a warning has a review dropdown and a note box. The dropdown saves as soon as you change it. The note saves only when you click **Save note** (or press Ctrl+Enter / ⌘+Enter); until then the box is highlighted and marked *Unsaved*. Drag the box's corner to make it bigger. Unsaved notes survive filtering and sorting while the page is open, and the browser asks before you leave the page with unsaved notes.
+Every row can be reviewed, because a bridge can look fine on the map and still have a problem (a relocated bridge, for example, whose records all sit at the new site). Rows with a warning always show the review dropdown and note box; other rows show a small **✎ Review** button that opens them, and stay open once they have a review or a note. **Reviewed or noted only** lists every row with a saved review or note.
+
+The dropdown saves as soon as you change it. The note saves only when you click **Save note** (or press Ctrl+Enter / ⌘+Enter); until then the box is highlighted and marked *Unsaved*. Drag the box's corner to make it bigger. Unsaved notes survive filtering and sorting while the page is open, and the browser asks before you leave the page with unsaved notes.
 
 | Choice | Meaning |
 |---|---|
@@ -117,7 +119,7 @@ UTM locations are stored with the reviews (same access token, same storage, unde
 - `iTAP: demolished, SHAARD not updated` exports as *Change the rating to Demolished*.
 - `iTAP: standing, SHAARD says demolished` exports as *Check the Demolished rating*.
 
-A row with a warning is left out until it is reviewed as **Same bridge** or **Relocation**, so a bad match can't get the wrong record changed. Rows without warnings are included directly.
+A row with a warning is left out until it is reviewed as **Same bridge** or **Relocation**, so a bad match can't get the wrong record changed. Any row reviewed as **Not the same bridge** or **Unsure** is left out too, warning or not. Other rows without warnings are included directly.
 
 ## Project structure
 

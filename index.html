@@ -183,6 +183,7 @@
       <input type="search" id="search" placeholder="Filter by NBI, HB-, survey #, or name" oninput="App.render()">
       <label><input type="checkbox" id="warnOnly" onchange="App.render()"> Match warnings only</label>
       <label><input type="checkbox" id="unreviewedOnly" onchange="App.render()"> Unreviewed warnings only</label>
+      <label><input type="checkbox" id="reviewedOnly" onchange="App.render()"> Reviewed or noted only</label>
       <label><input type="checkbox" id="newOnly" onchange="App.render()"> New since last run only</label>
       <select id="srcFilter" onchange="App.render()" title="Which bridges to show">
         <option value="">All bridges</option><option value="layer">In the INDOT Select/Non-Select layers</option><option value="itap">NBI (in iTAP, not in Select/Non-Select)</option>
@@ -1209,11 +1210,13 @@ const App = {
     const q = document.getElementById('search').value.trim().toLowerCase();
     const warnOnly = document.getElementById('warnOnly').checked, newOnly = document.getElementById('newOnly').checked;
     const unreviewedOnly = document.getElementById('unreviewedOnly').checked;
+    const reviewedOnly = document.getElementById('reviewedOnly').checked;
     const src = document.getElementById('srcFilter').value;
     return this.rows.filter(r => {
       if (this.activeCat !== 'all' && r.cat !== this.activeCat) return false;
       if (warnOnly && !r.warn.length) return false;
       if (unreviewedOnly && (!r.warn.length || Reviews.get(r)?.match)) return false;
+      if (reviewedOnly && !Reviews.get(r)) return false;
       if (newOnly && !r.isNew) return false;
       if (src === 'layer' && (!r.indot || r.indot.itapOnly)) return false;
       if (src === 'itap' && !r.indot?.itapOnly) return false;
@@ -1288,9 +1291,17 @@ const App = {
     tr.replaceWith(fresh);
   },
 
+  // Every row can be reviewed: a bridge can look fine on the map and still have a problem
+  // (relocated, wrong site recorded…). Rows with a warning always show the controls; other
+  // rows show a small "Review" button until they have a review, a note or an unsaved draft.
+  reviewOpen: new Set(),
   reviewHtml(r) {
-    if (!r.warn.length) return '';
     const v = Reviews.get(r), off = Reviews.ready ? '' : ' disabled';
+    const k = Reviews.key(r);
+    if (!r.warn.length && !v && !this.noteDrafts.has(k) && !this.reviewOpen.has(k)) {
+      const title = Reviews.ready ? 'Add a review or note for this bridge' : 'Enter the review access token to add reviews';
+      return `<div class="review"><button class="utm-btn"${off} title="${title}" onclick="App.openReview(${r.idx})">✎ Review</button></div>`;
+    }
     const opts = REVIEW_CHOICES.map(c => `<option value="${c.key}"${(v?.match || '') === c.key ? ' selected' : ''}>${H.esc(c.label)}</option>`).join('');
     return `<div class="review"><select${off} onchange="App.setReview(${r.idx}, { match: this.value })">${opts}</select>
       ${this.noteHtml(r, v, off)}</div>`;
@@ -1300,6 +1311,11 @@ const App = {
   // Unsaved text is kept per row while the page is open, so filtering or re-sorting
   // doesn't throw it away, and leaving the page with unsaved notes asks first.
   noteDrafts: new Map(),
+  openReview(idx) {
+    this.reviewOpen.add(Reviews.key(this.rows[idx]));
+    this.redrawRow(idx);
+    document.querySelector(`#tbody tr[data-idx="${idx}"] .review select`)?.focus();
+  },
   noteHtml(r, v, off) {
     const k = Reviews.key(r), draft = this.noteDrafts.get(k), saved = v?.note || '';
     const text = draft ?? saved, dirty = draft != null && draft !== saved;
@@ -1374,7 +1390,7 @@ const App = {
       'iTAP status', 'iTAP checked on', 'iTAP checked by', 'iTAP note', 'iTAP UTM zone', 'iTAP UTM easting', 'iTAP UTM northing', 'How matched', 'Latitude', 'Longitude', 'Historic Bridge SHAARD link', 'County Survey SHAARD link'];
     const lines = [head, ...rows.map(r => {
       const p = r.indot && r.indot.lat != null ? r.indot : (r.hb || r.sv || r.nr);
-      const rv = r.warn.length ? Reviews.get(r) : null;
+      const rv = Reviews.get(r);
       return [CATEGORIES.find(c => c.key === r.cat).title, r.isNew ? 'Yes' : '', r.warn.join('; '),
         REVIEW_CHOICES.find(c => c.key === rv?.match)?.label, rv?.note,
         r.indot?.nbi, r.indot?.kind, r.indot?.countyNo, r.indot?.linkRaw,
@@ -1400,15 +1416,17 @@ const App = {
     for (const r of this.rows) {
       const a = ask[r.cat];
       if (!a) continue;
-      const rv = r.warn.length ? Reviews.get(r) : null;
-      if (r.warn.length && !['same', 'relocated'].includes(rv?.match)) { held++; continue; }
+      const rv = Reviews.get(r);
+      // Held back: a warned row not yet confirmed as the same bridge, or any row someone
+      // reviewed as Not the same bridge or Unsure.
+      if ((r.warn.length && !['same', 'relocated'].includes(rv?.match)) || ['different', 'unsure'].includes(rv?.match)) { held++; continue; }
       for (const x of [r.hb, r.sv, r.nr]) {
         if (x?.status !== a.status) continue;
         lines.push([x.id, ({ hb: 'Historic Bridge', sv: 'County Survey', nr: 'National Register' })[x.layer], x.name, x.rating, a.request,
           r.indot?.nbi, r.itap?.raw, r.itap?.on, r.itap?.note, rv?.note]);
       }
     }
-    const heldText = held ? `${held} row${held === 1 ? '' : 's'} left out until the warning is reviewed as Same bridge or Relocation.` : '';
+    const heldText = held ? `${held} row${held === 1 ? '' : 's'} left out: a warning not yet reviewed as Same bridge or Relocation, or a review of Not the same bridge / Unsure.` : '';
     if (lines.length === 1) { this.setStatus('reviewStatus', `Nothing to export. ${heldText}`); return; }
     H.download(`shaard-status-changes-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
     this.setStatus('reviewStatus', `✓ Exported ${lines.length - 1} SHAARD record${lines.length === 2 ? '' : 's'}. ${heldText}`);
