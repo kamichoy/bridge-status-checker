@@ -11,6 +11,7 @@ Finds Indiana bridges whose demolished or standing status disagrees across data 
 | Historic Bridges (SHAARD) | Rating, name, location | Read from the state GIS service |
 | County Survey (SHAARD) | Rating, name, location, for bridge-like records only | Read from the state GIS service |
 | INDOT Select and Non-Select Bridges | NBI number, county bridge number, linked HB or IHSSI ID, location | Read from the state GIS service |
+| National Register sites (SHAARD) | NR ID, name, listed / delisted status, location, for bridge-like names only | Read from the state GIS service |
 | iTAP | Whether the bridge is confirmed extant or gone | A CSV or Excel file you load into the page |
 
 The GIS data loads each time the page opens. Those layers are read-only published copies, so a change made in SHAARD appears here only after the layer is republished. The page cannot tell you when that will happen.
@@ -23,7 +24,7 @@ The GIS data loads each time the page opens. Those layers are read-only publishe
 4. Review any rows with a match warning (⚠).
 5. Click **Export for SHAARD** to get the list to send to SHAARD staff.
 
-Click a table row or map dot to see that bridge's records on the map: **I** for INDOT, **H** for Historic Bridge and **S** for County Survey, with the distances between them.
+Click a table row or map dot to see that bridge's records on the map: **I** for INDOT, **H** for Historic Bridge, **S** for County Survey, **N** for National Register and **T** for an iTAP UTM location you entered, with the distances between them.
 
 ## Issue categories
 
@@ -34,7 +35,7 @@ Each row goes into the first category it fits.
 | iTAP: demolished, SHAARD not updated | iTAP says the bridge is gone, but a SHAARD record rates it as standing | Send to SHAARD staff |
 | iTAP: standing, SHAARD says demolished | iTAP says the bridge is there, but a SHAARD record rates it Demolished | One of them is wrong, so ask SHAARD staff to check |
 | iTAP: status unknown | The bridge is in iTAP, but its status there is Unknown | Check iTAP notes, imagery or the county |
-| Historic Bridge vs Survey disagree | The two SHAARD layers differ and iTAP has not been checked | Check the bridge in iTAP |
+| SHAARD layers disagree | The Historic Bridge, County Survey and NR records differ and iTAP has not been checked | Check the bridge in iTAP |
 | Verify in iTAP | Still in the INDOT inventory, but SHAARD says demolished | Look it up in iTAP and record the result |
 | Consistent | Every source with an answer agrees | None |
 
@@ -43,6 +44,9 @@ Each row goes into the first category it fits.
 1. **By ID:** an INDOT bridge links to a Historic Bridge or County Survey record through the HB or IHSSI ID on its record.
 2. **Historic Bridge to County Survey:** these layers share no ID, so they pair only when each is the other's closest candidate within 656 ft.
 3. **By distance from INDOT:** an INDOT bridge with no usable ID takes the closest record within 656 ft.
+4. **National Register:** NR sites share no ID with the other layers. An NR bridge first pairs **by name** with a Historic Bridge or County Survey record up to 3 mi away (closest wins), so an NR point in the wrong place still finds its bridge. Names count as the same when they match after dropping "No."/"Number", "#" and filler words and expanding St/Rd/Ave/Cr, or when one is a subset of the other with at least two real words in common. Otherwise it pairs **by distance**, within 656 ft. A Historic Bridge or Survey record that isn't in any other row gets one when an NR record matches it, and an NR bridge that matches nothing gets a row of its own.
+
+A listed NR record counts as standing; one whose status says delisted, demolished or removed counts as demolished. The NR layer's ID, name and status fields are found automatically, and the load message shows which ones were used. If the layer renames them, set `idField`, `nameField` and `statusField` under `CONFIG.layers.nrSites`.
 
 All distances are in feet, and in miles from 5,280 ft up.
 
@@ -56,6 +60,8 @@ A warning means the records may not describe the same bridge.
 | `HB-xxxx is not in the Historic Bridges layer` | Wrong ID, or a record missing from the layer | Search for the ID in SHAARD |
 | `Survey #xxx not found` | Wrong ID, or a record missing from the layer | Search for the ID in SHAARD |
 | `Numbers in the two names don't match` | Two nearby bridges were paired | Compare the names, county bridge numbers, roads and streams |
+| `NR-xxxx (NR) is 2.1 mi from the nearest other record` (over 1,640 ft) | The NR point is misplaced, or two bridges with the same name were paired | Compare the **N** pin with the others on the Imagery basemap and check the NR nomination's location |
+| `Numbers in the NR name don't match` | The NR record was paired with a different numbered bridge | Compare the NR name with the Historic Bridge or Survey name |
 
 The **Map** and **Street View** links open only one point, so use the page's map to compare the records.
 
