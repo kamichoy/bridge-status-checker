@@ -1310,11 +1310,12 @@ const App = {
   reviewOpen: new Set(),
   reviewHtml(r) {
     const v = Reviews.get(r), off = Reviews.ready ? '' : ' disabled';
-    const k = Reviews.key(r), hasContent = !!(v?.match || v?.note || v?.target);
+    const k = Reviews.key(r), hasContent = !!(v?.match || v?.note);
     const check = this.checkHtml(r, v, off);
     if (!r.warn.length && !hasContent && !this.noteDrafts.has(k) && !this.reviewOpen.has(k)) {
       const title = Reviews.ready ? 'Add a review or note for this bridge' : 'Enter the review access token to add reviews';
-      return `<div class="review">${check}<button class="utm-btn"${off} title="${title}" onclick="App.openReview(${r.idx})">✎ Review</button></div>`;
+      // Should be sits next to ✓ when it's needed, so a simple case is "pick it, then ✓".
+      return `<div class="review">${check}${this.targetHtml(r, v, off)}<button class="utm-btn"${off} title="${title}" onclick="App.openReview(${r.idx})">✎ Review</button></div>`;
     }
     const opts = REVIEW_CHOICES.map(c => `<option value="${c.key}"${(v?.match || '') === c.key ? ' selected' : ''}>${H.esc(c.label)}</option>`).join('');
     return `<div class="review">${check}<select${off} onchange="App.setReview(${r.idx}, { match: this.value })">${opts}</select>
@@ -1382,7 +1383,7 @@ const App = {
     return `<div class="review-note"><textarea id="rvnote-${r.idx}" class="${dirty ? 'dirty' : ''}"${off} rows="2" maxlength="4000" placeholder="Review note"
         oninput="App.noteEdited(${r.idx})" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();App.saveNote(${r.idx})}">${H.esc(text)}</textarea>
       <div class="review-note-bar"><button id="rvsave-${r.idx}"${dirty ? '' : ' disabled'} onclick="App.saveNote(${r.idx})">Save note</button>
-      ${!r.warn.length && !(v?.match || v?.note || v?.target) ? `<button class="review-close" title="Close without saving anything" onclick="App.closeReview(${r.idx})">Close</button>` : ''}
+      ${!r.warn.length && !(v?.match || v?.note) ? `<button class="review-close" title="Close without saving anything" onclick="App.closeReview(${r.idx})">Close</button>` : ''}
       <span class="note-state${dirty ? ' dirty' : ''}" id="rvstate-${r.idx}">${H.esc(state)}</span></div></div>`;
   },
   noteEdited(idx) {
