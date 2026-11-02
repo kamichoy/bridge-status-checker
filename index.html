@@ -98,6 +98,18 @@
   .issue-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
   .warn { color: var(--warn); font-size: 11.5px; margin-top: 3px; }
   .review { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .utm { margin-top: 5px; }
+  .utm-btn { white-space: nowrap; font-size: 11px; padding: 2px 7px; border: 1px solid #ced4da; background: white; border-radius: 4px; cursor: pointer; color: var(--text); }
+  .utm-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .utm-btn.set { border-color: var(--primary); color: var(--primary); }
+  .utm-form { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .utm-form input { font-size: 11.5px; padding: 3px 5px; border: 1px solid #ced4da; border-radius: 4px; width: 92px; }
+  .utm-form input.z { width: 38px; }
+  .utm-form button { font-size: 11px; padding: 3px 7px; border-radius: 4px; border: 1px solid #ced4da; background: white; cursor: pointer; }
+  .utm-form button.ok { background: var(--primary); border-color: var(--primary); color: white; }
+  .utm-err { color: var(--danger); font-size: 11px; width: 100%; }
+  .utm-dist { font-size: 11px; margin-top: 2px; }
+  .pin.itap { border-style: dashed; }
   .review select, .review input { font-size: 11.5px; padding: 3px 5px; border: 1px solid #ced4da; border-radius: 4px; max-width: 170px; }
   .tag-new { display: inline-block; background: var(--primary); color: white; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
   .links a { display: inline-block; margin: 0 6px 3px 0; font-size: 12px; color: var(--primary); text-decoration: none; white-space: nowrap; }
@@ -172,7 +184,7 @@
     <div class="split">
     <div class="map-wrap"><div class="sticky">
       <div id="map"></div>
-      <div class="map-note">Dots show the rows in the current view, colored by issue (a dark ring = match warning). Click a dot or a table row to see that bridge's records: <b>I</b> INDOT, <b>H</b> Historic Bridge, <b>S</b> County Survey, colored by what each source says, with the distance between them.</div>
+      <div class="map-note">Dots show the rows in the current view, colored by issue (a dark ring = match warning). Click a dot or a table row to see that bridge's records: <b>I</b> INDOT, <b>T</b> the iTAP UTM location (when entered with the 📍 button), <b>H</b> Historic Bridge, <b>S</b> County Survey, colored by what each source says, with the distance between them.</div>
     </div></div>
     <div class="table-wrap">
       <table>
@@ -271,6 +283,37 @@ const H = {
     const dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(h));
+  },
+  // UTM (WGS84 / NAD83, northern hemisphere) to latitude/longitude. All of Indiana is zone 16.
+  utmToLatLon(zone, E, N) {
+    const a = 6378137, f = 1 / 298.257223563, k0 = 0.9996;
+    const e2 = f * (2 - f), ep2 = e2 / (1 - e2), r2d = 180 / Math.PI;
+    const x = E - 500000, y = N;
+    const mu = (y / k0) / (a * (1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256));
+    const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+    const p1 = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu) + (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+      + (151 * e1 ** 3 / 96) * Math.sin(6 * mu) + (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+    const s = Math.sin(p1), c = Math.cos(p1), t = Math.tan(p1);
+    const N1 = a / Math.sqrt(1 - e2 * s * s), T1 = t * t, C1 = ep2 * c * c, R1 = a * (1 - e2) / Math.pow(1 - e2 * s * s, 1.5), D = x / (N1 * k0);
+    const lat = p1 - (N1 * t / R1) * (D ** 2 / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 ** 2 - 9 * ep2) * D ** 4 / 24
+      + (61 + 90 * T1 + 298 * C1 + 45 * T1 ** 2 - 252 * ep2 - 3 * C1 ** 2) * D ** 6 / 720);
+    const lon = ((zone - 1) * 6 - 177) / r2d + (D - (1 + 2 * T1 + C1) * D ** 3 / 6 + (5 - 2 * C1 + 28 * T1 - 3 * C1 ** 2 + 8 * ep2 + 24 * T1 ** 2) * D ** 5 / 120) / c;
+    return { lat: lat * r2d, lon: lon * r2d };
+  },
+  // Reads what a user typed (or pasted from iTAP) into a checked UTM point, or { error }.
+  // Accepts "571234.5", "571,234.5", or both numbers pasted into the easting box.
+  parseUtm(zone, e, n) {
+    const nums = s => (String(s || '').replace(/,(?=\d{3}\b)/g, '').match(/\d+(\.\d+)?/g) || []).map(Number);
+    let z = parseInt(String(zone || '').trim(), 10) || 16;
+    let [E, N] = [nums(e)[0], nums(n)[0]];
+    if (N == null && nums(e).length >= 2) [E, N] = nums(e);
+    if (E == null || N == null) return { error: 'Enter both the easting (X) and northing (Y).' };
+    if (E > N) [E, N] = [N, E];                                      // typed the wrong way round
+    if (z < 1 || z > 60) return { error: 'The zone should be a number from 1 to 60 (Indiana is 16).' };
+    if (E < 100000 || E > 900000 || N < 1000000 || N > 9400000) return { error: 'Those numbers don\'t look like UTM meters: easting is about 6 digits, northing about 7.' };
+    const { lat, lon } = H.utmToLatLon(z, E, N);
+    if (lat < 37.6 || lat > 41.9 || lon < -88.3 || lon > -84.6) return { error: `That point falls outside Indiana (${lat.toFixed(4)}, ${lon.toFixed(4)}). Check the zone and the numbers.` };
+    return { zone: z, e: Math.round(E * 10) / 10, n: Math.round(N * 10) / 10, lat, lon };
   },
   fmtDist(d) { return d >= 5280 ? (d / 5280).toFixed(1) + ' mi' : Math.round(d) + ' ft'; },
   // "Demolished" → demolished; blank / "Not Rated" → unknown; any real rating → standing.
@@ -467,7 +510,8 @@ const Reviews = {
     try {
       this.data = await this.request('GET');
       this.ready = true;
-      App.setStatus('reviewStatus', `✓ ${Object.keys(this.data).length} saved review${Object.keys(this.data).length === 1 ? '' : 's'} loaded`);
+      const keys = Object.keys(this.data), nUtm = keys.filter(k => k.startsWith('utm:')).length, nRev = keys.length - nUtm;
+      App.setStatus('reviewStatus', `✓ ${nRev} saved review${nRev === 1 ? '' : 's'}${nUtm ? ` and ${nUtm} UTM location${nUtm === 1 ? '' : 's'}` : ''} loaded`);
     } catch (e) {
       console.error(e);
       App.setStatus('reviewStatus', `Couldn't load the reviews: ${H.esc(e.message)}. Saving is off.`, true);
@@ -481,9 +525,28 @@ const Reviews = {
   save(r, patch) {
     const k = this.key(r), rec = { ...this.data[k], ...patch, on: H.today() };
     if (rec.match || rec.note) this.data[k] = rec; else delete this.data[k];
+    this.persist('the review');
+  },
+  persist(what) {
     this.queue = this.queue.then(() => this.request('PUT', JSON.stringify(this.data)))
       .then(() => App.setStatus('reviewStatus', `✓ Saved ${new Date().toLocaleTimeString()}`))
-      .catch(e => { console.error(e); App.setStatus('reviewStatus', `Couldn't save the review: ${H.esc(e.message)}`, true); });
+      .catch(e => { console.error(e); App.setStatus('reviewStatus', `Couldn't save ${what}: ${H.esc(e.message)}`, true); });
+  },
+  // iTAP UTM location for a bridge, kept by NBI so it survives any change in matching or
+  // category. Stored in the same document as the reviews, under "utm:<NBI>".
+  // Only zone / easting / northing are stored; lat/lon is worked out here and cached in memory.
+  utmCache: new Map(),
+  utmGet(nbiKey) {
+    const v = nbiKey ? this.data['utm:' + nbiKey] : null;
+    if (!v) return null;
+    const ck = `${v.zone}|${v.e}|${v.n}`;
+    if (!this.utmCache.has(ck)) this.utmCache.set(ck, H.utmToLatLon(v.zone, v.e, v.n));
+    return { ...v, ...this.utmCache.get(ck) };
+  },
+  utmSave(nbiKey, rec) {
+    if (rec) this.data['utm:' + nbiKey] = { zone: rec.zone, e: rec.e, n: rec.n, on: H.today() };
+    else delete this.data['utm:' + nbiKey];
+    this.persist('the UTM location');
   }
 };
 
@@ -609,6 +672,7 @@ const MapView = {
       d.innerHTML = `<details${window.innerWidth >= 1200 ? ' open' : ''}><summary>Legend</summary>` + '<b>Issue</b>' + CATEGORIES.map(c => `<div><span class="cat-dot" style="background:${c.color}"></span>${H.esc(c.title)}</div>`).join('') +
         '<b>Selected bridge</b>' +
         `<div><span class="pin sq unknown">I</span>INDOT (colored by iTAP)</div>` +
+        `<div><span class="pin itap unknown">T</span>iTAP UTM location (if entered)</div>` +
         `<div><span class="pin unknown">H</span>Historic Bridge</div>` +
         `<div><span class="pin unknown">S</span>County Survey</div>` +
         `<div><span class="cat-dot" style="background:var(--demolished)"></span>Demolished <span class="cat-dot" style="background:var(--standing);margin-left:8px"></span>Standing <span class="cat-dot" style="background:#9aa4b1;margin-left:8px"></span>Unknown</div></details>`;
@@ -664,6 +728,9 @@ const MapView = {
     const recs = [];
     if (r.indot && r.indot.lat != null) recs.push({ p: r.indot, letter: 'I', sq: true, status: r.itap?.status || 'unknown',
       html: `<b>INDOT ${H.esc(r.indot.kind)} · NBI ${H.esc(r.indot.nbi)}</b><br>On file: ${H.esc(r.indot.linkRaw || '—')}<br>iTAP: ${H.esc(r.itap ? (r.itap.raw || r.itap.status) : 'not checked')}` });
+    const u = Reviews.utmGet(r.indot?.nbiKey);
+    if (u) recs.push({ p: u, letter: 'T', status: r.itap?.status || 'unknown', cls: 'itap',
+      html: `<b>iTAP UTM location · NBI ${H.esc(r.indot.nbi)}</b><br>Zone ${u.zone} · E ${u.e} · N ${u.n}<br><span style="color:#8a94a3">Entered ${H.esc(u.on || '')}</span>` });
     if (r.hb && r.hb.lat != null) recs.push({ p: r.hb, letter: 'H', status: r.hb.status,
       html: `<b>Historic Bridge ${H.esc(r.hb.id)}</b><br>${H.esc(r.hb.name)}<br>Rating: ${H.esc(r.hb.rating || 'none')}` });
     if (r.sv && r.sv.lat != null) recs.push({ p: r.sv, letter: 'S', status: r.sv.status,
@@ -693,7 +760,7 @@ const MapView = {
     }
     for (const x of recs) {
       const others = recs.filter(y => y !== x).map(y => { const d = H.dist(x.p, y.p); return `${y.letter}: ${H.fmtDist(d)} away`; });
-      L.marker([x.p.lat, x.p.lon], { icon: this.pin(x.letter, x.status, x.sq), zIndexOffset: 1000 })
+      L.marker([x.p.lat, x.p.lon], { icon: this.pin(x.letter, (x.cls ? x.cls + ' ' : '') + x.status, x.sq), zIndexOffset: 1000 })
         .bindPopup(`<div style="font-size:12.5px;line-height:1.5">${x.html}${others.length ? '<br><span style="color:#8a94a3">' + others.join(' · ') + '</span>' : ''}</div>`).addTo(this.sel);
     }
     if (zoom) document.getElementById('map').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -928,6 +995,67 @@ const App = {
 
   badge(status, label) { return `<span class="badge b-${status}">${H.esc(label || status)}</span>`; },
 
+  // UTM box for every INDOT bridge with an iTAP record (or a saved UTM): a small button
+  // that opens zone / easting / northing fields, saved to the shared review storage.
+  utmOpen: new Set(),
+  utmHtml(r) {
+    const b = r.indot;
+    if (!b) return '';
+    const u = Reviews.utmGet(b.nbiKey);
+    if (!r.itap && !u) return '';
+    const i = r.idx, off = Reviews.ready ? '' : ' disabled';
+    if (this.utmOpen.has(i)) {
+      return `<div class="utm"><div class="utm-form">
+        <input class="z" id="utmz-${i}" value="${u ? u.zone : 16}" title="UTM zone (Indiana is 16)" placeholder="Zone">
+        <input id="utme-${i}" value="${u ? u.e : ''}" placeholder="Easting X" title="UTM easting (X), meters">
+        <input id="utmn-${i}" value="${u ? u.n : ''}" placeholder="Northing Y" title="UTM northing (Y), meters"
+          onkeydown="if(event.key==='Enter')App.utmSave(${i})">
+        <button class="ok" onclick="App.utmSave(${i})">Save</button>
+        ${u ? `<button onclick="App.utmClear(${i})">Remove</button>` : ''}
+        <button onclick="App.utmToggle(${i}, false)">Cancel</button>
+        <div class="utm-err" id="utmerr-${i}"></div></div></div>`;
+    }
+    let dist = '';
+    if (u && b.lat != null) {
+      const d = H.dist(b, u), far = d > CONFIG.idMatchFarFeet;
+      dist = `<div class="utm-dist ${far ? 'warn' : 'name'}">${far ? '⚠ ' : ''}iTAP point is ${H.fmtDist(d)} from the INDOT point</div>`;
+    }
+    const label = u ? '📍 Edit UTM' : '📍 Add UTM';
+    const coords = u ? `<div class="utm-dist name id">${u.zone} · ${Math.round(u.e)} E · ${Math.round(u.n)} N</div>` : '';
+    const title = Reviews.ready ? (u ? 'Edit the iTAP UTM location' : 'Enter the UTM location shown in iTAP') : 'Enter the review access token to add UTM locations';
+    return `<div class="utm"><button class="utm-btn${u ? ' set' : ''}"${off} title="${title}" onclick="App.utmToggle(${i}, true)">${label}</button>${coords}${dist}</div>`;
+  },
+  utmToggle(idx, open) {
+    if (open) this.utmOpen.add(idx); else this.utmOpen.delete(idx);
+    this.redrawRow(idx);
+    if (open) document.getElementById(`utme-${idx}`)?.focus();
+  },
+  utmSave(idx) {
+    const r = this.rows[idx], v = id => document.getElementById(`${id}-${idx}`)?.value;
+    const p = H.parseUtm(v('utmz'), v('utme'), v('utmn'));
+    if (p.error) { document.getElementById(`utmerr-${idx}`).textContent = p.error; return; }
+    Reviews.utmSave(r.indot.nbiKey, p);
+    this.utmOpen.delete(idx);
+    this.redrawRow(idx);
+    this.select(idx, 'table');
+  },
+  utmClear(idx) {
+    Reviews.utmSave(this.rows[idx].indot.nbiKey, null);
+    this.utmOpen.delete(idx);
+    this.redrawRow(idx);
+    if (this.selected === idx) MapView.showSelection(this.rows[idx], false);
+  },
+  // Re-draws one table row in place (keeps scroll position and the other rows' inputs).
+  redrawRow(idx) {
+    const tr = document.querySelector(`#tbody tr[data-idx="${idx}"]`);
+    if (!tr) return;
+    const t = document.createElement('tbody');
+    t.innerHTML = this.rowHtml(this.rows[idx]);
+    const fresh = t.firstElementChild;
+    if (tr.classList.contains('sel')) fresh.classList.add('sel');
+    tr.replaceWith(fresh);
+  },
+
   reviewHtml(r) {
     if (!r.warn.length) return '';
     const v = Reviews.get(r), off = Reviews.ready ? '' : ' disabled';
@@ -945,12 +1073,12 @@ const App = {
     if (r.hb) links.push(`<a href="${H.shaardUrl(r.hb.id)}" target="_blank" rel="noopener">SHAARD ${H.esc(r.hb.id)}</a>`);
     if (r.sv) links.push(`<a href="${H.shaardUrl(r.sv.id)}" target="_blank" rel="noopener">SHAARD survey</a>`);
     if (p && p.lat != null) links.push(`<a href="${H.mapUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Map</a>`, `<a href="${H.svUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Street View</a>`);
-    return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a,select,input'))App.select(${r.idx},'table')">
+    return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a,select,input,button'))App.select(${r.idx},'table')">
       <td><div class="issue"><span class="cat-dot" style="background:${cat.color}"></span>${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}${this.reviewHtml(r)}</td>
       <td>${b ? `<div class="id">NBI ${H.esc(b.nbi)}</div><div class="name">${H.esc(b.kind)}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>${b.linkRaw ? `<div class="name">On file: ${H.esc(b.linkRaw)}</div>` : ''}` : '<span class="muted">Not in INDOT inventory</span>'}</td>
       <td>${rec(r.hb)}</td>
       <td>${rec(r.sv)}</td>
-      <td>${r.itap ? `${this.badge(r.itap.status, r.itap.raw || r.itap.status)}<div class="name">${H.esc([r.itap.on, r.itap.by].filter(Boolean).join(' · '))}</div>${r.itap.note ? `<div class="name">${H.esc(r.itap.note)}</div>` : ''}` : (b ? '<span class="muted">Not checked</span>' : '<span class="muted">—</span>')}</td>
+      <td>${r.itap ? `${this.badge(r.itap.status, r.itap.raw || r.itap.status)}<div class="name">${H.esc([r.itap.on, r.itap.by].filter(Boolean).join(' · '))}</div>${r.itap.note ? `<div class="name">${H.esc(r.itap.note)}</div>` : ''}` : (b ? '<span class="muted">Not checked</span>' : '<span class="muted">—</span>')}${this.utmHtml(r)}</td>
       <td class="name">${H.esc(r.how.join('; ') || '—')}</td>
       <td class="links">${links.join('')}</td>
     </tr>`;
@@ -960,7 +1088,7 @@ const App = {
     const rows = this.visibleRows();
     const head = ['Issue', 'New since last run', 'Match warnings', 'Match review', 'Review note', 'NBI', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
       'Historic Bridge ID', 'Historic Bridge name', 'Historic Bridge rating', 'County Survey #', 'County Survey name', 'County Survey rating',
-      'iTAP status', 'iTAP checked on', 'iTAP checked by', 'iTAP note', 'How matched', 'Latitude', 'Longitude', 'Historic Bridge SHAARD link', 'County Survey SHAARD link'];
+      'iTAP status', 'iTAP checked on', 'iTAP checked by', 'iTAP note', 'iTAP UTM zone', 'iTAP UTM easting', 'iTAP UTM northing', 'How matched', 'Latitude', 'Longitude', 'Historic Bridge SHAARD link', 'County Survey SHAARD link'];
     const lines = [head, ...rows.map(r => {
       const p = r.indot && r.indot.lat != null ? r.indot : (r.hb || r.sv);
       const rv = r.warn.length ? Reviews.get(r) : null;
@@ -968,7 +1096,7 @@ const App = {
         REVIEW_CHOICES.find(c => c.key === rv?.match)?.label, rv?.note,
         r.indot?.nbi, r.indot?.kind, r.indot?.countyNo, r.indot?.linkRaw,
         r.hb?.id, r.hb?.name, r.hb?.rating, r.sv?.id, r.sv?.name, r.sv?.rating,
-        r.itap?.raw, r.itap?.on, r.itap?.by, r.itap?.note, r.how.join('; '),
+        r.itap?.raw, r.itap?.on, r.itap?.by, r.itap?.note, ...((u => [u?.zone, u?.e, u?.n])(Reviews.utmGet(r.indot?.nbiKey))), r.how.join('; '),
         p?.lat?.toFixed(6), p?.lon?.toFixed(6), H.shaardUrl(r.hb?.id), H.shaardUrl(r.sv?.id)];
     })].map(l => l.map(H.csvCell).join(','));
     const tag = this.activeCat === 'all' ? 'all' : this.activeCat;
@@ -1008,12 +1136,14 @@ const App = {
     const order = { checkShaard: 0, notifyShaard: 1, itapUnknown: 2, verifyItap: 3, disagree: 4, ok: 5 };
     const rows = this.rows.filter(r => r.indot).sort((a, b) => (order[a.cat] - order[b.cat]) || a.indot.nbi.localeCompare(b.indot.nbi));
     const head = ['NBI', 'iTAP Status', 'Checked On', 'Checked By', 'Note', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
-      'Historic Bridge ID', 'Historic Bridge rating', 'County Survey #', 'County Survey rating', 'SHAARD says demolished?', 'Latitude', 'Longitude'];
+      'Historic Bridge ID', 'Historic Bridge rating', 'County Survey #', 'County Survey rating', 'SHAARD says demolished?', 'Latitude', 'Longitude',
+      'iTAP UTM zone', 'iTAP UTM easting', 'iTAP UTM northing'];
     const lines = [head, ...rows.map(r => {
       const b = r.indot, it = r.itap;
       const dem = [r.hb, r.sv].some(x => x?.status === 'demolished') ? 'Yes' : '';
       return [b.nbi, it?.raw || '', it?.on || '', it?.by || '', it?.note || '', b.kind, b.countyNo, b.linkRaw,
-        r.hb?.id, r.hb?.rating, r.sv?.id, r.sv?.rating, dem, b.lat?.toFixed(6), b.lon?.toFixed(6)];
+        r.hb?.id, r.hb?.rating, r.sv?.id, r.sv?.rating, dem, b.lat?.toFixed(6), b.lon?.toFixed(6),
+        ...((u => [u?.zone, u?.e, u?.n])(Reviews.utmGet(b.nbiKey)))];
     })].map(l => l.map(H.csvCell).join(','));
     H.download(`itap_verified.csv`, lines.join('\r\n'));
   }

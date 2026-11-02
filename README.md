@@ -82,6 +82,18 @@ To remove the token from a browser, run this in the developer console:
 localStorage.removeItem('bridgeCheck.reviewToken')
 ```
 
+## iTAP UTM locations
+
+Every INDOT bridge that has an iTAP record shows a **📍 Add UTM** button in its iTAP cell. Use it when a match looks doubtful and you want to check where iTAP itself puts the bridge.
+
+1. Open the bridge in iTAP and copy its **UTM Easting (X)**, **UTM Northing (Y)** and **UTM Zone**.
+2. Click **📍 Add UTM**, fill in the three fields (the zone defaults to 16, which covers all of Indiana) and press **Save** or Enter. Pasting both numbers into the easting box also works, and the two numbers are swapped back automatically if they were entered the wrong way round.
+3. The map then shows a **T** pin at that point (dashed outline, colored by the iTAP status), with distances to the **I**, **H** and **S** pins. The cell says how far the iTAP point is from the INDOT point, with a ⚠ past 1,640 ft.
+
+Entries outside Indiana, or numbers that aren't UTM meters, are rejected with a message. **📍 Edit UTM** changes or removes a saved location.
+
+UTM locations are stored with the reviews (same access token, same storage, under `utm:<NBI>`), so they are shared by everyone using the page and stay attached to the bridge even if its matches or category change. Only the zone, easting and northing are stored. They also appear in **Export shown rows** and the **iTAP worksheet**, but are not read back from a loaded file.
+
 ## Exports
 
 | Button | Contents |
