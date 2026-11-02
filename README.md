@@ -114,10 +114,7 @@ UTM locations are stored with the reviews (same access token, same storage, unde
 | **Export shown rows (CSV)** | Every row in the current view, including warnings and reviews |
 | **Export for SHAARD** | One line per SHAARD record that needs action |
 
-**Export for SHAARD** includes only the two iTAP conflict categories:
-
-- `iTAP: demolished, SHAARD not updated` exports as *Change the rating to Demolished*.
-- `iTAP: standing, SHAARD says demolished` exports as *Check the Demolished rating*.
+**Export for SHAARD** includes only the two iTAP conflict categories, *iTAP: demolished, SHAARD not updated* and *iTAP: standing, SHAARD says demolished*, with one line per SHAARD record that disagrees with iTAP. Columns: **SHAARD ID**, **Name**, **Layer**, **Current rating**, **iTAP status**, **iTAP note**, **Review note**, **NBI**. The rating next to the iTAP status shows what needs changing; anything more specific goes in the review note.
 
 A row with a warning is left out until it is reviewed as **Same bridge** or **Relocation**, so a bad match can't get the wrong record changed. Any row reviewed as **Not the same bridge** or **Unsure** is left out too, warning or not. Other rows without warnings are included directly.
 

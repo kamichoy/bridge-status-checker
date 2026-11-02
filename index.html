@@ -1421,11 +1421,10 @@ const App = {
   // One line per SHAARD record to act on. A row with a match warning goes out only once
   // it is reviewed as the same bridge, so a bad match can't get the wrong record changed.
   exportShaard() {
-    const ask = {
-      notifyShaard: { status: 'standing', request: 'Change the rating to Demolished' },
-      checkShaard: { status: 'demolished', request: 'Check the Demolished rating' }
-    };
-    const head = ['SHAARD ID', 'Layer', 'Name', 'Current rating', 'Requested', 'NBI', 'iTAP status', 'iTAP checked on', 'iTAP note', 'Review note'];
+    // Which SHAARD record in the row to list: the one that disagrees with iTAP. What to do
+    // about it is left to the rating vs iTAP status and the reviewer's note.
+    const ask = { notifyShaard: { status: 'standing' }, checkShaard: { status: 'demolished' } };
+    const head = ['SHAARD ID', 'Name', 'Layer', 'Current rating', 'iTAP status', 'iTAP note', 'Review note', 'NBI'];
     const lines = [head];
     let held = 0;
     for (const r of this.rows) {
@@ -1437,8 +1436,8 @@ const App = {
       if ((r.warn.length && !['same', 'relocated'].includes(rv?.match)) || ['different', 'unsure'].includes(rv?.match)) { held++; continue; }
       for (const x of [r.hb, r.sv, r.nr]) {
         if (x?.status !== a.status) continue;
-        lines.push([x.id, ({ hb: 'Historic Bridge', sv: 'County Survey', nr: 'National Register' })[x.layer], x.name, x.rating, a.request,
-          r.indot?.nbi, r.itap?.raw, r.itap?.on, r.itap?.note, rv?.note]);
+        lines.push([x.id, x.name, ({ hb: 'Historic Bridge', sv: 'County Survey', nr: 'National Register' })[x.layer], x.rating,
+          r.itap?.raw, r.itap?.note, rv?.note, r.indot?.nbi]);
       }
     }
     const heldText = held ? `${held} row${held === 1 ? '' : 's'} left out: a warning not yet reviewed as Same bridge or Relocation, or a review of Not the same bridge / Unsure.` : '';
