@@ -114,14 +114,17 @@ UTM locations are stored with the reviews (same access token, same storage, unde
 | Button | Contents |
 |---|---|
 | **Export shown rows (CSV)** | Every row in the current view, including warnings and reviews |
-| **Export for SHAARD** | One line per bridge with a review note, or ✓ checked in an iTAP-conflict category |
+| **Export for SHAARD** | One line per SHAARD record to change (with your note), plus *See note* lines |
 
-**Export for SHAARD** gives one line per bridge, with every SHAARD record for it (ID · name · rating) in its own column, plus the iTAP status and note, the review, the review note and the date it was ✓ checked. It includes:
+**Export for SHAARD** is the list for SHAARD staff: which record to change, to what, and your note as the evidence.
 
-- **every bridge with a review note**, whatever its category: the note is what tells SHAARD staff what's wrong (a misplaced record, a relocation, a complicated case);
-- **✓ checked bridges in the two iTAP-conflict categories** (*iTAP: demolished, SHAARD not updated* and *iTAP: standing, SHAARD says demolished*), even without a note: plain status corrections, where the rating next to the iTAP status shows what to change.
+`SHAARD ID, Name, Layer, Current rating, Change to, Note, iTAP status, NBI`
 
-A ✓ bridge without a note is held back when the match is in doubt: a warning not reviewed as **Same bridge** or **Relocation**, or a review of **Not the same bridge** / **Unsure**. Bridges with a note are never held back. The message after exporting gives the counts, including how many were held back and why.
+- A bridge goes out once it has a **review note** or a **✓**.
+- Each of its SHAARD records that disagrees with what the bridge *should* be becomes a **Change to** line (*Demolished*, or *Not demolished (check the rating)*). What it should be comes from iTAP; when iTAP has no answer (not in the file, or Unknown) and the SHAARD records disagree, choose it with the **Should be** dropdown in the review. Records that are already right are left out.
+- These lines go out only when the match isn't in doubt: no warning left without **Same bridge** / **Relocation**, and no **Not the same bridge** / **Unsure**.
+- A bridge with a note but no such change (a location problem, a case still in doubt, no *Should be* chosen) goes out as one **See note** line listing all its SHAARD records.
+- The review choice and ✓ themselves aren't in the file; they only decide what goes in. The message after exporting gives the counts and anything left out.
 
 ## Project structure
 
