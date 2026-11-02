@@ -249,7 +249,7 @@ const CONFIG = {
   // that aren't in the Select/Non-Select layers, and a second location for those that are.
   nbi: {
     url: 'https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/NTAD_National_Bridge_Inventory/FeatureServer/0',
-    where: "STATE_CODE_001 LIKE '18%'",
+    where: "STATE_CODE_001 = '18'",
     idField: 'STRUCTURE_NUMBER_008', latField: 'LATDD', lonField: 'LONGDD',
     extraFields: ['FACILITY_CARRIED_007', 'FEATURES_DESC_006A', 'YEAR_BUILT_027']
   },

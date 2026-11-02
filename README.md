@@ -12,7 +12,7 @@ Finds Indiana bridges whose demolished or standing status disagrees across data 
 | County Survey (SHAARD) | Rating, name, location, for bridge-like records only | Read from the state GIS service |
 | INDOT Select and Non-Select Bridges | NBI number, county bridge number, linked HB or IHSSI ID, location | Read from the state GIS service |
 | National Register sites (SHAARD) | NR ID, name, listed / delisted status, location, for bridge-like names only | Read from the state GIS service |
-| National Bridge Inventory (FHWA NTAD) | Location of every Indiana bridge by NBI number (`STATE_CODE_001` starting `18`) | Read from the FHWA ArcGIS service |
+| National Bridge Inventory (FHWA NTAD) | Location of every Indiana bridge by NBI number (`STATE_CODE_001` = `18`) | Read from the FHWA ArcGIS service |
 | iTAP | Whether the bridge is extant or gone, plus its HB / IHSSI numbers and replacement bridge NBI | iTAP's Search Results export (`.xlsx` or CSV), loaded into the page |
 
 The GIS data loads each time the page opens. Those layers are read-only published copies, so a change made in SHAARD appears here only after the layer is republished. The page cannot tell you when that will happen.
