@@ -112,6 +112,14 @@
   .pin.itap { border-style: dashed; }
   .pin.nbi { border-radius: 2px; border-style: double; border-width: 3px; }
   .review select, .review input { font-size: 11.5px; padding: 3px 5px; border: 1px solid #ced4da; border-radius: 4px; max-width: 170px; }
+  .review-note { width: 100%; }
+  .review textarea { display: block; width: 100%; min-width: 170px; min-height: 34px; resize: both; font: 11.5px/1.4 -apple-system, "Segoe UI", sans-serif; padding: 4px 6px; border: 1px solid #ced4da; border-radius: 4px; color: var(--text); }
+  .review textarea.dirty { border-color: var(--warn); background: #fffaf0; }
+  .review-note-bar { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+  .review-note-bar button { font-size: 11px; padding: 2px 9px; border-radius: 4px; border: 1px solid var(--primary); background: var(--primary); color: white; cursor: pointer; }
+  .review-note-bar button:disabled { opacity: 0.35; cursor: default; }
+  .note-state { font-size: 11px; color: var(--text-muted); }
+  .note-state.dirty { color: var(--warn); font-weight: 600; }
   .tag-new { display: inline-block; background: var(--primary); color: white; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
   .links a { display: inline-block; margin: 0 6px 3px 0; font-size: 12px; color: var(--primary); text-decoration: none; white-space: nowrap; }
   .links a:hover { text-decoration: underline; }
@@ -284,6 +292,9 @@ const CATEGORIES = [
 const REVIEW_CHOICES = [
   { key: '', label: 'Not reviewed' },
   { key: 'same', label: 'Same bridge' },
+  // Same bridge, moved to a new site: the records really are one bridge even though their
+  // locations differ, so it counts like Same bridge for Export for SHAARD.
+  { key: 'relocated', label: 'Relocation' },
   { key: 'different', label: 'Not the same bridge' },
   { key: 'unsure', label: 'Unsure' }
 ];
@@ -928,6 +939,7 @@ const App = {
   rows: [], activeCat: 'notifyShaard', prevKeys: null,
 
   async init() {
+    window.addEventListener('beforeunload', e => { if (this.noteDrafts.size) { e.preventDefault(); e.returnValue = ''; } });
     MapView.init();
     await Reviews.load();
     await this.loadAll();
@@ -1281,7 +1293,41 @@ const App = {
     const v = Reviews.get(r), off = Reviews.ready ? '' : ' disabled';
     const opts = REVIEW_CHOICES.map(c => `<option value="${c.key}"${(v?.match || '') === c.key ? ' selected' : ''}>${H.esc(c.label)}</option>`).join('');
     return `<div class="review"><select${off} onchange="App.setReview(${r.idx}, { match: this.value })">${opts}</select>
-      <input type="text"${off} placeholder="Review note" maxlength="500" value="${H.esc(v?.note)}" onchange="App.setReview(${r.idx}, { note: this.value })"></div>`;
+      ${this.noteHtml(r, v, off)}</div>`;
+  },
+
+  // Review note: a resizable box with its own Save button (Ctrl/⌘+Enter also saves).
+  // Unsaved text is kept per row while the page is open, so filtering or re-sorting
+  // doesn't throw it away, and leaving the page with unsaved notes asks first.
+  noteDrafts: new Map(),
+  noteHtml(r, v, off) {
+    const k = Reviews.key(r), draft = this.noteDrafts.get(k), saved = v?.note || '';
+    const text = draft ?? saved, dirty = draft != null && draft !== saved;
+    const state = dirty ? 'Unsaved' : (saved && v?.on ? `Saved ${v.on}` : '');
+    return `<div class="review-note"><textarea id="rvnote-${r.idx}" class="${dirty ? 'dirty' : ''}"${off} rows="2" maxlength="4000" placeholder="Review note"
+        oninput="App.noteEdited(${r.idx})" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();App.saveNote(${r.idx})}">${H.esc(text)}</textarea>
+      <div class="review-note-bar"><button id="rvsave-${r.idx}"${dirty ? '' : ' disabled'} onclick="App.saveNote(${r.idx})">Save note</button>
+      <span class="note-state${dirty ? ' dirty' : ''}" id="rvstate-${r.idx}">${H.esc(state)}</span></div></div>`;
+  },
+  noteEdited(idx) {
+    const r = this.rows[idx], ta = document.getElementById(`rvnote-${idx}`), k = Reviews.key(r);
+    const dirty = ta.value !== (Reviews.get(r)?.note || '');
+    if (dirty) this.noteDrafts.set(k, ta.value); else this.noteDrafts.delete(k);
+    ta.classList.toggle('dirty', dirty);
+    document.getElementById(`rvsave-${idx}`).disabled = !dirty;
+    const st = document.getElementById(`rvstate-${idx}`);
+    st.textContent = dirty ? 'Unsaved' : '';
+    st.classList.toggle('dirty', dirty);
+  },
+  saveNote(idx) {
+    const r = this.rows[idx], ta = document.getElementById(`rvnote-${idx}`);
+    if (!ta || ta.disabled) return;
+    this.noteDrafts.delete(Reviews.key(r));
+    this.setReview(idx, { note: ta.value.trim() });
+    ta.classList.remove('dirty');
+    document.getElementById(`rvsave-${idx}`).disabled = true;
+    const st = document.getElementById(`rvstate-${idx}`);
+    if (st) { st.textContent = ta.value.trim() ? `Saved ${H.today()}` : 'Note removed'; st.classList.remove('dirty'); }
   },
 
   bridgeCell(b) {
@@ -1308,7 +1354,7 @@ const App = {
     if (r.sv) links.push(`<a href="${H.shaardUrl(r.sv.id)}" target="_blank" rel="noopener">SHAARD survey</a>`);
     if (r.nr) links.push(`<a href="${H.shaardUrl(r.nr.id)}" target="_blank" rel="noopener">SHAARD ${H.esc(r.nr.id)}</a>`);
     if (p && p.lat != null) links.push(`<a href="${H.mapUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Map</a>`, `<a href="${H.svUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Street View</a>`);
-    return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a,select,input,button'))App.select(${r.idx},'table')">
+    return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a,select,input,button,textarea'))App.select(${r.idx},'table')">
       <td><div class="issue"><span class="cat-dot" style="background:${cat.color}"></span>${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}${this.reviewHtml(r)}</td>
       <td>${b ? this.bridgeCell(b) : '<span class="muted">Not in INDOT inventory or iTAP</span>'}</td>
       <td>${rec(r.hb)}</td>
@@ -1355,14 +1401,14 @@ const App = {
       const a = ask[r.cat];
       if (!a) continue;
       const rv = r.warn.length ? Reviews.get(r) : null;
-      if (r.warn.length && rv?.match !== 'same') { held++; continue; }
+      if (r.warn.length && !['same', 'relocated'].includes(rv?.match)) { held++; continue; }
       for (const x of [r.hb, r.sv, r.nr]) {
         if (x?.status !== a.status) continue;
         lines.push([x.id, ({ hb: 'Historic Bridge', sv: 'County Survey', nr: 'National Register' })[x.layer], x.name, x.rating, a.request,
           r.indot?.nbi, r.itap?.raw, r.itap?.on, r.itap?.note, rv?.note]);
       }
     }
-    const heldText = held ? `${held} row${held === 1 ? '' : 's'} left out until the warning is reviewed as Same bridge.` : '';
+    const heldText = held ? `${held} row${held === 1 ? '' : 's'} left out until the warning is reviewed as Same bridge or Relocation.` : '';
     if (lines.length === 1) { this.setStatus('reviewStatus', `Nothing to export. ${heldText}`); return; }
     H.download(`shaard-status-changes-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
     this.setStatus('reviewStatus', `✓ Exported ${lines.length - 1} SHAARD record${lines.length === 2 ? '' : 's'}. ${heldText}`);

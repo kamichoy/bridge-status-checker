@@ -73,12 +73,13 @@ Changing a status in SHAARD does not clear a warning. Warnings come from IDs, co
 
 ## Reviews
 
-Each row with a warning has a review dropdown and a note field. Changes save automatically.
+Each row with a warning has a review dropdown and a note box. The dropdown saves as soon as you change it. The note saves only when you click **Save note** (or press Ctrl+Enter / ⌘+Enter); until then the box is highlighted and marked *Unsaved*. Drag the box's corner to make it bigger. Unsaved notes survive filtering and sorting while the page is open, and the browser asks before you leave the page with unsaved notes.
 
 | Choice | Meaning |
 |---|---|
 | Not reviewed | No decision yet |
 | Same bridge | The match is correct |
+| Relocation | Same bridge, but it was moved to a new site, so the records' locations legitimately differ |
 | Not the same bridge | The match is wrong |
 | Unsure | More checking is needed |
 
@@ -116,7 +117,7 @@ UTM locations are stored with the reviews (same access token, same storage, unde
 - `iTAP: demolished, SHAARD not updated` exports as *Change the rating to Demolished*.
 - `iTAP: standing, SHAARD says demolished` exports as *Check the Demolished rating*.
 
-A row with a warning is left out until it is reviewed as **Same bridge**, so a bad match can't get the wrong record changed. Rows without warnings are included directly.
+A row with a warning is left out until it is reviewed as **Same bridge** or **Relocation**, so a bad match can't get the wrong record changed. Rows without warnings are included directly.
 
 ## Project structure
 
