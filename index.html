@@ -97,7 +97,11 @@
   .issue { font-weight: 600; font-size: 12.5px; }
   .issue-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
   .warn { color: var(--warn); font-size: 11.5px; margin-top: 3px; }
-  .review { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .review { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; align-items: center; }
+  .check-btn { font-size: 11.5px; font-weight: 700; padding: 2px 8px; border: 1.5px solid #ced4da; border-radius: 12px; background: white; color: #9aa4b1; cursor: pointer; white-space: nowrap; }
+  .check-btn:hover:not(:disabled) { border-color: var(--standing); color: var(--standing); }
+  .check-btn.on { background: var(--standing); border-color: var(--standing); color: white; }
+  tr.is-checked td:first-child { box-shadow: inset 3px 0 0 var(--standing); }
   .utm { margin-top: 5px; }
   .utm-btn { white-space: nowrap; font-size: 11px; padding: 2px 7px; border: 1px solid #ced4da; background: white; border-radius: 4px; cursor: pointer; color: var(--text); }
   .utm-btn:hover { border-color: var(--primary); color: var(--primary); }
@@ -116,7 +120,7 @@
   .review textarea { display: block; width: 100%; min-width: 170px; min-height: 34px; resize: both; font: 11.5px/1.4 -apple-system, "Segoe UI", sans-serif; padding: 4px 6px; border: 1px solid #ced4da; border-radius: 4px; color: var(--text); }
   .review textarea.dirty { border-color: var(--warn); background: #fffaf0; }
   .review-note-bar { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
-  .review-note-bar button { font-size: 11px; padding: 2px 9px; border-radius: 4px; border: 1px solid var(--primary); background: var(--primary); color: white; cursor: pointer; }
+  .review-note-bar button { white-space: nowrap; font-size: 11px; padding: 2px 9px; border-radius: 4px; border: 1px solid var(--primary); background: var(--primary); color: white; cursor: pointer; }
   .review-note-bar button:disabled { opacity: 0.35; cursor: default; }
   .review-note-bar button.review-close { background: white; color: var(--text-muted); border-color: #ced4da; }
   .review-note-bar button.review-close:hover { color: var(--text); border-color: var(--text-muted); }
@@ -185,7 +189,8 @@
       <input type="search" id="search" placeholder="Filter by NBI, HB-, survey #, or name" oninput="App.render()">
       <label><input type="checkbox" id="warnOnly" onchange="App.render()"> Match warnings only</label>
       <label><input type="checkbox" id="unreviewedOnly" onchange="App.render()"> Unreviewed warnings only</label>
-      <label><input type="checkbox" id="reviewedOnly" onchange="App.render()"> Reviewed or noted only</label>
+      <label><input type="checkbox" id="reviewedOnly" onchange="App.render()"> Reviewed, noted or ✓ only</label>
+      <label><input type="checkbox" id="uncheckedOnly" onchange="App.render()"> Not ✓ yet</label>
       <label><input type="checkbox" id="newOnly" onchange="App.render()"> New since last run only</label>
       <select id="srcFilter" onchange="App.render()" title="Which bridges to show">
         <option value="">All bridges</option><option value="layer">In the INDOT Select/Non-Select layers</option><option value="itap">NBI (in iTAP, not in Select/Non-Select)</option>
@@ -593,7 +598,7 @@ const Reviews = {
   // Saves run one at a time, each sending the latest data, so the last change always wins.
   save(r, patch) {
     const k = this.key(r), rec = { ...this.data[k], ...patch, on: H.today() };
-    if (rec.match || rec.note) this.data[k] = rec; else delete this.data[k];
+    if (rec.match || rec.note || rec.checked) this.data[k] = rec; else delete this.data[k];
     this.persist('the review');
   },
   persist(what) {
@@ -1216,12 +1221,14 @@ const App = {
     const warnOnly = document.getElementById('warnOnly').checked, newOnly = document.getElementById('newOnly').checked;
     const unreviewedOnly = document.getElementById('unreviewedOnly').checked;
     const reviewedOnly = document.getElementById('reviewedOnly').checked;
+    const uncheckedOnly = document.getElementById('uncheckedOnly').checked;
     const src = document.getElementById('srcFilter').value;
     return this.rows.filter(r => {
       if (this.activeCat !== 'all' && r.cat !== this.activeCat) return false;
       if (warnOnly && !r.warn.length) return false;
       if (unreviewedOnly && (!r.warn.length || Reviews.get(r)?.match)) return false;
       if (reviewedOnly && !Reviews.get(r)) return false;
+      if (uncheckedOnly && Reviews.get(r)?.checked) return false;
       if (newOnly && !r.isNew) return false;
       if (src === 'layer' && (!r.indot || r.indot.itapOnly)) return false;
       if (src === 'itap' && !r.indot?.itapOnly) return false;
@@ -1302,14 +1309,29 @@ const App = {
   reviewOpen: new Set(),
   reviewHtml(r) {
     const v = Reviews.get(r), off = Reviews.ready ? '' : ' disabled';
-    const k = Reviews.key(r);
-    if (!r.warn.length && !v && !this.noteDrafts.has(k) && !this.reviewOpen.has(k)) {
+    const k = Reviews.key(r), hasContent = !!(v?.match || v?.note);
+    const check = this.checkHtml(r, v, off);
+    if (!r.warn.length && !hasContent && !this.noteDrafts.has(k) && !this.reviewOpen.has(k)) {
       const title = Reviews.ready ? 'Add a review or note for this bridge' : 'Enter the review access token to add reviews';
-      return `<div class="review"><button class="utm-btn"${off} title="${title}" onclick="App.openReview(${r.idx})">✎ Review</button></div>`;
+      return `<div class="review">${check}<button class="utm-btn"${off} title="${title}" onclick="App.openReview(${r.idx})">✎ Review</button></div>`;
     }
     const opts = REVIEW_CHOICES.map(c => `<option value="${c.key}"${(v?.match || '') === c.key ? ' selected' : ''}>${H.esc(c.label)}</option>`).join('');
-    return `<div class="review"><select${off} onchange="App.setReview(${r.idx}, { match: this.value })">${opts}</select>
+    return `<div class="review">${check}<select${off} onchange="App.setReview(${r.idx}, { match: this.value })">${opts}</select>
       ${this.noteHtml(r, v, off)}</div>`;
+  },
+
+  // ✓ = "I've looked at this one." A quick mark for simple cases; shared like reviews.
+  checkHtml(r, v, off) {
+    const on = !!v?.checked;
+    const title = !Reviews.ready ? 'Enter the review access token to mark bridges as checked'
+      : on ? `Checked ${v.checkedOn || ''} — click to undo` : 'Mark this bridge as checked';
+    return `<button class="check-btn${on ? ' on' : ''}"${off} title="${title}" onclick="App.toggleCheck(${r.idx})">✓${on ? ' Checked' : ''}</button>`;
+  },
+  toggleCheck(idx) {
+    const r = this.rows[idx], on = !Reviews.get(r)?.checked;
+    this.setReview(idx, on ? { checked: true, checkedOn: H.today() } : { checked: false, checkedOn: '' });
+    this.redrawRow(idx);
+    if (document.getElementById('uncheckedOnly').checked && on) this.render();
   },
 
   // Review note: a resizable box with its own Save button (Ctrl/⌘+Enter also saves).
@@ -1337,7 +1359,7 @@ const App = {
     return `<div class="review-note"><textarea id="rvnote-${r.idx}" class="${dirty ? 'dirty' : ''}"${off} rows="2" maxlength="4000" placeholder="Review note"
         oninput="App.noteEdited(${r.idx})" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();App.saveNote(${r.idx})}">${H.esc(text)}</textarea>
       <div class="review-note-bar"><button id="rvsave-${r.idx}"${dirty ? '' : ' disabled'} onclick="App.saveNote(${r.idx})">Save note</button>
-      ${!r.warn.length && !v ? `<button class="review-close" title="Close without saving anything" onclick="App.closeReview(${r.idx})">Close</button>` : ''}
+      ${!r.warn.length && !(v?.match || v?.note) ? `<button class="review-close" title="Close without saving anything" onclick="App.closeReview(${r.idx})">Close</button>` : ''}
       <span class="note-state${dirty ? ' dirty' : ''}" id="rvstate-${r.idx}">${H.esc(state)}</span></div></div>`;
   },
   noteEdited(idx) {
@@ -1385,7 +1407,7 @@ const App = {
     if (r.sv) links.push(`<a href="${H.shaardUrl(r.sv.id)}" target="_blank" rel="noopener">SHAARD survey</a>`);
     if (r.nr) links.push(`<a href="${H.shaardUrl(r.nr.id)}" target="_blank" rel="noopener">SHAARD ${H.esc(r.nr.id)}</a>`);
     if (p && p.lat != null) links.push(`<a href="${H.mapUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Map</a>`, `<a href="${H.svUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Street View</a>`);
-    return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a,select,input,button,textarea'))App.select(${r.idx},'table')">
+    return `<tr data-idx="${r.idx}"${Reviews.get(r)?.checked ? ' class="is-checked"' : ''} onclick="if(!event.target.closest('a,select,input,button,textarea'))App.select(${r.idx},'table')">
       <td><div class="issue"><span class="cat-dot" style="background:${cat.color}"></span>${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}${this.reviewHtml(r)}</td>
       <td>${b ? this.bridgeCell(b) : '<span class="muted">Not in INDOT inventory or iTAP</span>'}</td>
       <td>${rec(r.hb)}</td>
@@ -1420,31 +1442,40 @@ const App = {
 
   // One line per SHAARD record to act on. A row with a match warning goes out only once
   // it is reviewed as the same bridge, so a bad match can't get the wrong record changed.
+  // What goes to SHAARD staff, one line per bridge:
+  //  · every bridge with a review note, whatever its category (the note says what's wrong);
+  //  · bridges in the two iTAP-conflict categories that are ✓ checked, even without a note
+  //    (a plain status correction). These are held back when the match is in doubt: a
+  //    warning not reviewed as Same bridge / Relocation, or a review of Not the same bridge / Unsure.
   exportShaard() {
-    const ask = {
-      notifyShaard: { status: 'standing', request: 'Change the rating to Demolished' },
-      checkShaard: { status: 'demolished', request: 'Check the Demolished rating' }
-    };
-    const head = ['SHAARD ID', 'Layer', 'Name', 'Current rating', 'Requested', 'NBI', 'iTAP status', 'iTAP checked on', 'iTAP note', 'Review note'];
-    const lines = [head];
-    let held = 0;
+    const conflict = new Set(['notifyShaard', 'checkShaard']);
+    const order = Object.fromEntries(CATEGORIES.map((c, i) => [c.key, i]));
+    const rec = x => x ? [x.id, x.name, x.rating].filter(Boolean).join(' · ') : '';
+    const head = ['Issue', 'NBI', 'Historic Bridge', 'County Survey', 'National Register', 'iTAP status', 'iTAP note', 'Review', 'Review note', 'Checked'];
+    const out = [], held = { warn: 0, doubt: 0 };
+    let nNote = 0, nCheck = 0;
     for (const r of this.rows) {
-      const a = ask[r.cat];
-      if (!a) continue;
-      const rv = Reviews.get(r);
-      // Held back: a warned row not yet confirmed as the same bridge, or any row someone
-      // reviewed as Not the same bridge or Unsure.
-      if ((r.warn.length && !['same', 'relocated'].includes(rv?.match)) || ['different', 'unsure'].includes(rv?.match)) { held++; continue; }
-      for (const x of [r.hb, r.sv, r.nr]) {
-        if (x?.status !== a.status) continue;
-        lines.push([x.id, ({ hb: 'Historic Bridge', sv: 'County Survey', nr: 'National Register' })[x.layer], x.name, x.rating, a.request,
-          r.indot?.nbi, r.itap?.raw, r.itap?.on, r.itap?.note, rv?.note]);
+      const rv = Reviews.get(r), note = (rv?.note || '').trim();
+      let take = false;
+      if (note) { take = true; nNote++; }
+      else if (conflict.has(r.cat) && rv?.checked) {
+        if (['different', 'unsure'].includes(rv.match)) held.doubt++;
+        else if (r.warn.length && !['same', 'relocated'].includes(rv.match)) held.warn++;
+        else { take = true; nCheck++; }
       }
+      if (take) out.push(r);
     }
-    const heldText = held ? `${held} row${held === 1 ? '' : 's'} left out: a warning not yet reviewed as Same bridge or Relocation, or a review of Not the same bridge / Unsure.` : '';
-    if (lines.length === 1) { this.setStatus('reviewStatus', `Nothing to export. ${heldText}`); return; }
-    H.download(`shaard-status-changes-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
-    this.setStatus('reviewStatus', `✓ Exported ${lines.length - 1} SHAARD record${lines.length === 2 ? '' : 's'}. ${heldText}`);
+    out.sort((a, b) => (order[a.cat] - order[b.cat]) || String(a.indot?.nbi || a.hb?.id || '').localeCompare(String(b.indot?.nbi || b.hb?.id || '')));
+    const lines = [head, ...out.map(r => {
+      const rv = Reviews.get(r);
+      return [CATEGORIES.find(c => c.key === r.cat).title, r.indot?.nbi, rec(r.hb), rec(r.sv), rec(r.nr), r.itap?.raw, r.itap?.note,
+        rv?.match ? REVIEW_CHOICES.find(c => c.key === rv.match)?.label : '', rv?.note, rv?.checked ? (rv.checkedOn || 'Yes') : ''];
+    })];
+    const heldN = held.warn + held.doubt;
+    const heldText = heldN ? ` Held back ${heldN} ✓ bridge${heldN === 1 ? '' : 's'} without a note: ${[held.warn && `${held.warn} with a warning not reviewed as Same bridge / Relocation`, held.doubt && `${held.doubt} reviewed Not the same bridge / Unsure`].filter(Boolean).join(', ')}.` : '';
+    if (!out.length) { this.setStatus('reviewStatus', `Nothing to export: no bridge has a review note, and no bridge in the two iTAP-conflict categories is ✓ checked.${heldText}`); return; }
+    H.download(`shaard-review-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
+    this.setStatus('reviewStatus', `✓ Exported ${out.length} bridge${out.length === 1 ? '' : 's'}: ${nNote} with a review note, ${nCheck} ✓ status correction${nCheck === 1 ? '' : 's'} without a note.${heldText}`);
   }
 };
 
