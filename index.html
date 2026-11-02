@@ -147,7 +147,7 @@
     <details class="hint"><summary>How this works</summary>
       Load iTAP's <b>Search Results</b> export as it comes (.xlsx, or saved as CSV). <i>Nonextant</i> counts as demolished, any <i>Extant</i> status as standing, <i>Unknown</i> as unknown.
       Bridges in the INDOT Select/Non-Select layers use that layer's location. Every other bridge in the file is placed with its NBI location (or, when it has been replaced, the replacement bridge's NBI location) and linked through the HB / IHSSI numbers iTAP has on file.
-      It is matched to SHAARD by those numbers first, then by distance. iTAP-only bridges that match no SHAARD record are left out.
+      It is matched to SHAARD by those numbers first, then by distance. These NBI bridges are shown only when they match a SHAARD record.
     </details>
   </div>
 
@@ -177,7 +177,7 @@
       <label><input type="checkbox" id="unreviewedOnly" onchange="App.render()"> Unreviewed warnings only</label>
       <label><input type="checkbox" id="newOnly" onchange="App.render()"> New since last run only</label>
       <select id="srcFilter" onchange="App.render()" title="Which bridges to show">
-        <option value="">All bridges</option><option value="layer">In the INDOT Select/Non-Select layers</option><option value="itap">iTAP only (placed by NBI)</option>
+        <option value="">All bridges</option><option value="layer">In the INDOT Select/Non-Select layers</option><option value="itap">NBI (in iTAP, not in Select/Non-Select)</option>
       </select>
       <button class="btn" id="btnExport" onclick="App.exportIssues()" disabled>📤 Export shown rows (CSV)</button>
       <button class="btn" id="btnShaard" onclick="App.exportShaard()" disabled>📨 Export for SHAARD</button>
@@ -997,7 +997,7 @@ const App = {
         nbiNote = `, ${this.nbi.size.toLocaleString()} NBI bridge locations`;
       } catch (e) {
         console.error(e);
-        nbiNote = ` · <span style="color:var(--danger)">NBI layer not loaded: ${H.esc(e.message)}. iTAP-only bridges can still match by HB / IHSSI number.</span>`;
+        nbiNote = ` · <span style="color:var(--danger)">NBI layer not loaded: ${H.esc(e.message)}. Bridges outside Select/Non-Select can still match by their iTAP HB / IHSSI number.</span>`;
       }
       this.setStatus('dataStatus', `✓ Loaded ${this.hb.length.toLocaleString()} Historic Bridges, ${this.sv.length.toLocaleString()} bridge-like County Survey records, ${this.indot.length.toLocaleString()} INDOT bridges${nrNote}${nbiNote} — ${new Date().toLocaleString()}`);
       this.recompute(true);
@@ -1126,7 +1126,7 @@ const App = {
       if (!loc && it.replNbi) { loc = nbi.get(H.normNBI(it.replNbi)); if (loc) from = 'replacement'; }
       x[from === 'NBI' ? 'byNbi' : from ? 'byRepl' : 'none']++;
       extra.push({
-        kind: 'iTAP only', itapOnly: true, nbi: it.nbiRaw || k, nbiKey: k, countyNo: it.countyNo, county: it.county,
+        kind: 'NBI', itapOnly: true, nbi: it.nbiRaw || k, nbiKey: k, countyNo: it.countyNo, county: it.county,
         linkRaw: [it.hb, it.ihssi].filter(Boolean).join(' / '), link: H.parseLink(it.hb || it.ihssi),
         lat: loc?.lat ?? null, lon: loc?.lon ?? null, locFrom: from, replNbi: it.replNbi, nbiInfo: loc || null,
         place: [it.facility, it.feature && 'over ' + it.feature, it.location].filter(Boolean).join(', ')
@@ -1287,10 +1287,10 @@ const App = {
   bridgeCell(b) {
     const lines = [`<div class="id">NBI ${H.esc(b.nbi)}</div>`];
     if (b.itapOnly) {
-      lines.push(`<div class="name">iTAP only${b.county ? ' · ' + H.esc(b.county) : ''}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>`);
+      lines.push(`<div class="name">NBI · not in Select/Non-Select${b.county ? ' · ' + H.esc(b.county) : ''}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>`);
       if (b.place) lines.push(`<div class="name">${H.esc(b.place)}</div>`);
       if (b.linkRaw) lines.push(`<div class="name">iTAP: ${H.esc(b.linkRaw)}</div>`);
-      lines.push(`<div class="name">${b.locFrom === 'NBI' ? 'Location: NBI' : b.locFrom ? `Location: replacement bridge NBI ${H.esc(b.replNbi)}` : '<span style="color:var(--warn)">No NBI location</span>'}</div>`);
+      lines.push(`<div class="name">${b.locFrom === 'NBI' ? 'Location: NBI' : b.locFrom ? `Location: replacement bridge NBI ${H.esc(b.replNbi)}` : `<span style="color:var(--warn)">No NBI location${b.linkRaw ? ' (matched by the iTAP number)' : ''}</span>`}</div>`);
     } else {
       lines.push(`<div class="name">${H.esc(b.kind)}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>`);
       if (b.linkRaw) lines.push(`<div class="name">On file: ${H.esc(b.linkRaw)}</div>`);
