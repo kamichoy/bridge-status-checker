@@ -110,6 +110,7 @@
   .utm-err { color: var(--danger); font-size: 11px; width: 100%; }
   .utm-dist { font-size: 11px; margin-top: 2px; }
   .pin.itap { border-style: dashed; }
+  .pin.nbi { border-radius: 2px; border-style: double; border-width: 3px; }
   .review select, .review input { font-size: 11.5px; padding: 3px 5px; border: 1px solid #ced4da; border-radius: 4px; max-width: 170px; }
   .tag-new { display: inline-block; background: var(--primary); color: white; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
   .links a { display: inline-block; margin: 0 6px 3px 0; font-size: 12px; color: var(--primary); text-decoration: none; white-space: nowrap; }
@@ -137,18 +138,16 @@
   </div>
 
   <div class="panel">
-    <h3>2. iTAP verification file (CSV)</h3>
+    <h3>2. iTAP export</h3>
     <div class="row">
       <button class="btn" onclick="document.getElementById('csvInput').click()">⬆️ Load iTAP file</button>
       <input type="file" id="csvInput" accept=".csv,.xlsx,.xls,text/csv" style="display:none" onchange="App.loadCsvFile(this.files[0]); this.value='';">
-      <button class="btn" id="btnWorksheet" onclick="App.downloadWorksheet()" disabled>⬇️ Download iTAP worksheet</button>
       <span class="status-line" id="csvStatus">No iTAP file loaded.</span>
     </div>
     <details class="hint"><summary>How this works</summary>
-      The Select/Non-Select layers don't record demolitions, so the iTAP result for each bridge is kept in a CSV you maintain in Excel.
-      <b>Download iTAP worksheet</b> gives you every INDOT bridge with what SHAARD currently says, plus any iTAP entries already loaded.
-      Fill in the <b>iTAP Status</b> column (<i>Demolished</i>, <i>Standing</i> or <i>Unknown</i>; iTAP's own <i>Nonextant</i> / <i>Extant</i> wording also works), save as CSV, and load it back here. You can also load iTAP's <b>Search Results</b> export (.xlsx) directly, no conversion needed.
-      Only the NBI, iTAP Status, Checked On, Checked By and Note columns are read; other columns are ignored.
+      Load iTAP's <b>Search Results</b> export as it comes (.xlsx, or saved as CSV). <i>Nonextant</i> counts as demolished, any <i>Extant</i> status as standing, <i>Unknown</i> as unknown.
+      Bridges in the INDOT Select/Non-Select layers use that layer's location. Every other bridge in the file is placed with its NBI location (or, when it has been replaced, the replacement bridge's NBI location) and linked through the HB / IHSSI numbers iTAP has on file.
+      It is matched to SHAARD by those numbers first, then by distance. iTAP-only bridges that match no SHAARD record are left out.
     </details>
   </div>
 
@@ -177,6 +176,9 @@
       <label><input type="checkbox" id="warnOnly" onchange="App.render()"> Match warnings only</label>
       <label><input type="checkbox" id="unreviewedOnly" onchange="App.render()"> Unreviewed warnings only</label>
       <label><input type="checkbox" id="newOnly" onchange="App.render()"> New since last run only</label>
+      <select id="srcFilter" onchange="App.render()" title="Which bridges to show">
+        <option value="">All bridges</option><option value="layer">In the INDOT Select/Non-Select layers</option><option value="itap">iTAP only (placed by NBI)</option>
+      </select>
       <button class="btn" id="btnExport" onclick="App.exportIssues()" disabled>📤 Export shown rows (CSV)</button>
       <button class="btn" id="btnShaard" onclick="App.exportShaard()" disabled>📨 Export for SHAARD</button>
       <span class="count" id="count"></span>
@@ -184,7 +186,7 @@
     <div class="split">
     <div class="map-wrap"><div class="sticky">
       <div id="map"></div>
-      <div class="map-note">Dots show the rows in the current view, colored by issue (a dark ring = match warning). Click a dot or a table row to see that bridge's records: <b>I</b> INDOT, <b>T</b> the iTAP UTM location (when entered with the 📍 button), <b>H</b> Historic Bridge, <b>S</b> County Survey, <b>N</b> National Register, colored by what each source says, with the distance between them.</div>
+      <div class="map-note">Dots show the rows in the current view, colored by issue (a dark ring = match warning). Click a dot or a table row to see that bridge's records: <b>I</b> INDOT layer, <b>B</b> NBI location, <b>T</b> the iTAP UTM location (when entered with the 📍 button), <b>H</b> Historic Bridge, <b>S</b> County Survey, <b>N</b> National Register, colored by what each source says, with the distance between them.</div>
     </div></div>
     <div class="table-wrap">
       <table>
@@ -243,6 +245,14 @@ const CONFIG = {
   // An NR record whose name matches a Historic Bridge / Survey name is paired with it up
   // to this far away (3 mi), so a misplaced NR point still finds its bridge and gets flagged.
   nrNameRadiusFeet: 15840,
+  // FHWA National Bridge Inventory (NTAD), Indiana only. Gives a location to iTAP bridges
+  // that aren't in the Select/Non-Select layers, and a second location for those that are.
+  nbi: {
+    url: 'https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/NTAD_National_Bridge_Inventory/FeatureServer/0',
+    where: "STATE_CODE_001 = '18'",
+    idField: 'STRUCTURE_NUMBER_008', latField: 'LATDD', lonField: 'LONGDD',
+    extraFields: ['FACILITY_CARRIED_007', 'FEATURES_DESC_006A', 'YEAR_BUILT_027']
+  },
   // An ID match whose two points are farther apart than this gets a warning (the ID or
   // one of the points is probably wrong).
   idMatchFarFeet: 1640,
@@ -267,8 +277,6 @@ const CATEGORIES = [
     desc: 'The bridge is in iTAP, but its status there is Unknown. Check iTAP\'s Additional Information notes, imagery or the county to settle it.' },
   { key: 'disagree', color: '#6f42c1', title: 'SHAARD layers disagree',
     desc: 'Historic Bridge, County Survey and NR records for the bridge give different answers, and iTAP has not been checked.' },
-  { key: 'verifyItap', color: '#0d6efd', title: 'Verify in iTAP',
-    desc: 'Still in the INDOT inventory, but SHAARD says demolished. Look it up in iTAP and record the result.' },
   { key: 'ok', color: '#9fb8a6', title: 'Consistent',
     desc: 'Every source that has an answer agrees.' }
 ];
@@ -629,38 +637,52 @@ const Matcher = {
 
     const usedHb = new Set(), usedSv = new Set(), rows = [];
 
+    // Pass 1: ID links. `indotList` holds the INDOT layer bridges and the iTAP-only bridges
+    // (placed by NBI); for the latter the HB / IHSSI link comes from iTAP itself.
     for (const b of indotList) {
       const row = { indot: b, hb: null, sv: null, how: [], warn: [] };
+      // INDOT-row wording is unchanged on purpose: saved reviews are keyed on warning text.
+      const tag = b.itapOnly ? ' (from iTAP)' : '';
       if (b.link.type === 'hb') {
         row.hb = hbById.get(b.link.id) || null;
-        if (row.hb) row.how.push('HB by ID');
-        else row.warn.push(`${b.link.id} is not in the Historic Bridges layer`);
+        if (row.hb) row.how.push(b.itapOnly ? 'HB by ID (from iTAP)' : 'HB by ID');
+        else row.warn.push(`${b.link.id}${tag} is not in the Historic Bridges layer`);
       } else if (b.link.type === 'survey') {
         row.sv = svById.get(b.link.id) || null;
-        if (row.sv) row.how.push('Survey by ID');
-        else row.warn.push(`Survey #${b.link.id} not found`);
+        if (row.sv) row.how.push(b.itapOnly ? 'Survey by ID (from iTAP)' : 'Survey by ID');
+        else row.warn.push(`Survey #${b.link.id}${tag} not found`);
       }
       // Fill the missing side from the HB⇄Survey pairing
       if (row.hb && !row.sv && hbToSv.has(row.hb)) { const p = hbToSv.get(row.hb); row.sv = p.other; row.how.push(`Survey by distance (${Math.round(p.d)} ft from HB)`); }
       if (row.sv && !row.hb && svToHb.has(row.sv)) { const p = svToHb.get(row.sv); row.hb = p.other; row.how.push(`HB by distance (${Math.round(p.d)} ft from survey)`); }
-      // No usable ID: fall back to distance from the INDOT point itself
-      if (!row.hb && !row.sv && b.link.type === 'none' && b.lat != null) {
-        const nh = hbGrid.near(b, R)[0], ns = svGrid.near(b, R)[0];
-        if (nh) { row.hb = nh.it; row.how.push(`HB by distance (${Math.round(nh.d)} ft)`); }
-        if (ns) { row.sv = ns.it; row.how.push(`Survey by distance (${Math.round(ns.d)} ft)`); }
-        if (!nh && !ns) row.how.push(`No ID on file; nothing within ${R} ft`);
-      }
-      // Sanity checks on the matches
-      for (const rec of [row.hb, row.sv]) {
-        if (rec && b.lat != null && rec.lat != null) {
-          const d = H.dist(b, rec);
-          if (d > CONFIG.idMatchFarFeet) row.warn.push(`${rec.id} is ${H.fmtDist(d)} from the INDOT point`);
-        }
-      }
       if (row.hb) usedHb.add(row.hb);
       if (row.sv) usedSv.add(row.sv);
       row.itap = itap.get(b.nbiKey) || null;
       rows.push(row);
+    }
+    // Pass 2: no usable ID, so take the closest record not already claimed by an ID link.
+    for (const row of rows) {
+      const b = row.indot;
+      if (row.hb || row.sv || b.link.type !== 'none') continue;
+      if (b.lat == null) { row.how.push(b.itapOnly ? 'No HB / IHSSI in iTAP and no NBI location' : 'No ID and no location on file'); continue; }
+      const nh = hbGrid.near(b, R).find(x => !usedHb.has(x.it)), ns = svGrid.near(b, R).find(x => !usedSv.has(x.it));
+      if (nh) { row.hb = nh.it; usedHb.add(nh.it); row.how.push(`HB by distance (${Math.round(nh.d)} ft)`); }
+      if (ns) { row.sv = ns.it; usedSv.add(ns.it); row.how.push(`Survey by distance (${Math.round(ns.d)} ft)`); }
+      if (!nh && !ns) row.how.push(`No ID on file; nothing within ${R} ft`);
+    }
+    // Sanity checks on the matches, against the bridge's own point (INDOT layer or NBI)
+    for (const row of rows) {
+      const b = row.indot, where = b.itapOnly ? (b.locFrom === 'NBI' ? 'NBI' : 'replacement bridge NBI') : 'INDOT';
+      for (const rec of [row.hb, row.sv]) {
+        if (rec && b.lat != null && rec.lat != null) {
+          const d = H.dist(b, rec);
+          if (d > CONFIG.idMatchFarFeet) row.warn.push(`${rec.id} is ${H.fmtDist(d)} from the ${where} point`);
+        }
+      }
+      if (b.nbiPt && b.lat != null) {
+        const d = H.dist(b, b.nbiPt);
+        if (d > CONFIG.idMatchFarFeet) row.warn.push(`The NBI location is ${H.fmtDist(d)} from the INDOT point`);
+      }
     }
 
     // Historic Bridge ⇄ Survey pairs that aren't in the INDOT inventory at all
@@ -670,6 +692,16 @@ const Matcher = {
     }
 
     this.attachNr(rows, nrList, hbList, svList);
+
+    // iTAP-only bridges are kept only when they reach a SHAARD record (or flag a bad ID).
+    this.stats = { itapOnly: 0, itapKept: 0 };
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i];
+      if (!r.indot?.itapOnly) continue;
+      this.stats.itapOnly++;
+      if (r.hb || r.sv || r.nr || r.warn.length) this.stats.itapKept++;
+      else rows.splice(i, 1);
+    }
 
     for (const row of rows) {
       if (row.hb && row.sv) {
@@ -752,7 +784,6 @@ const Matcher = {
     if (it === 'demolished' && anyStand) return 'notifyShaard';
     if (it === 'standing' && anyDem) return 'checkShaard';
     if (!it && anyDem && anyStand) return 'disagree';
-    if (!it && anyDem && row.indot) return 'verifyItap';
     return 'ok';
   }
 };
@@ -782,7 +813,8 @@ const MapView = {
       const d = L.DomUtil.create('div', 'legend');
       d.innerHTML = `<details${window.innerWidth >= 1200 ? ' open' : ''}><summary>Legend</summary>` + '<b>Issue</b>' + CATEGORIES.map(c => `<div><span class="cat-dot" style="background:${c.color}"></span>${H.esc(c.title)}</div>`).join('') +
         '<b>Selected bridge</b>' +
-        `<div><span class="pin sq unknown">I</span>INDOT (colored by iTAP)</div>` +
+        `<div><span class="pin sq unknown">I</span>INDOT layer (colored by iTAP)</div>` +
+        `<div><span class="pin sq nbi unknown">B</span>NBI location (colored by iTAP)</div>` +
         `<div><span class="pin itap unknown">T</span>iTAP UTM location (if entered)</div>` +
         `<div><span class="pin unknown">H</span>Historic Bridge</div>` +
         `<div><span class="pin unknown">S</span>County Survey</div>` +
@@ -823,7 +855,8 @@ const MapView = {
     const key = rows.length + ':' + (rows[0]?.idx ?? '') + ':' + (rows[rows.length - 1]?.idx ?? '');
     if (key !== this.lastKey) {
       this.lastKey = key;
-      if (pts.length) this.map.fitBounds(L.latLngBounds(pts).pad(0.05), { maxZoom: 15 });
+      // No animation, so a click right after a filter change isn't undone when it finishes.
+      if (pts.length) this.map.fitBounds(L.latLngBounds(pts).pad(0.05), { maxZoom: 15, animate: false });
     }
     if (App.selected == null) this.sel.clearLayers();
   },
@@ -838,8 +871,14 @@ const MapView = {
     this.sel.clearLayers();
     this.dots.eachLayer(l => l.closeTooltip());
     const recs = [];
-    if (r.indot && r.indot.lat != null) recs.push({ p: r.indot, letter: 'I', sq: true, status: r.itap?.status || 'unknown',
-      html: `<b>INDOT ${H.esc(r.indot.kind)} · NBI ${H.esc(r.indot.nbi)}</b><br>On file: ${H.esc(r.indot.linkRaw || '—')}<br>iTAP: ${H.esc(r.itap ? (r.itap.raw || r.itap.status) : 'not checked')}` });
+    const b = r.indot, nb = b?.itapOnly ? b.nbiInfo : b?.nbiPt;
+    const nbiLine = nb ? `<br>NBI: ${H.esc([nb.facility, nb.feature && 'over ' + nb.feature, nb.year && 'built ' + nb.year].filter(Boolean).join(', '))}` : '';
+    if (b && b.lat != null && !b.itapOnly) recs.push({ p: b, letter: 'I', sq: true, status: r.itap?.status || 'unknown',
+      html: `<b>INDOT ${H.esc(b.kind)} · NBI ${H.esc(b.nbi)}</b><br>On file: ${H.esc(b.linkRaw || '—')}<br>iTAP: ${H.esc(r.itap ? (r.itap.raw || r.itap.status) : 'not in the file')}` });
+    // NBI location: the bridge's own point for an iTAP-only bridge, a second point for an INDOT one.
+    const bp = b?.itapOnly ? (b.lat != null ? b : null) : b?.nbiPt;
+    if (bp) recs.push({ p: bp, letter: 'B', sq: true, status: r.itap?.status || 'unknown', cls: 'nbi',
+      html: `<b>NBI location · ${H.esc(b.nbi)}</b>${b.itapOnly && b.locFrom === 'replacement' ? `<br>Replacement bridge NBI ${H.esc(b.replNbi)}` : ''}${nbiLine}<br>iTAP: ${H.esc(r.itap ? (r.itap.raw || r.itap.status) : 'not in the file')}` });
     const u = Reviews.utmGet(r.indot?.nbiKey);
     if (u) recs.push({ p: u, letter: 'T', status: r.itap?.status || 'unknown', cls: 'itap',
       html: `<b>iTAP UTM location · NBI ${H.esc(r.indot.nbi)}</b><br>Zone ${u.zone} · E ${u.e} · N ${u.n}<br><span style="color:#8a94a3">Entered ${H.esc(u.on || '')}</span>` });
@@ -944,8 +983,23 @@ const App = {
         this.nr = [];
         nrNote = ` · <span style="color:var(--danger)">NR layer not loaded: ${H.esc(e.message)}</span>`;
       }
-      this.setStatus('dataStatus', `✓ Loaded ${this.hb.length.toLocaleString()} Historic Bridges, ${this.sv.length.toLocaleString()} bridge-like County Survey records, ${this.indot.length.toLocaleString()} INDOT bridges${nrNote} — ${new Date().toLocaleString()}`);
-      document.getElementById('btnWorksheet').disabled = false;
+      this.setStatus('dataStatus', '<progress></progress> Loading Indiana bridge locations from the National Bridge Inventory…');
+      let nbiNote = '';
+      this.nbi = new Map();
+      try {
+        const N = CONFIG.nbi;
+        for (const f of await Data.all(N.url, N.where, [N.idField, N.latField, N.lonField, ...N.extraFields].join(','))) {
+          const a = f.attributes;
+          const lat = f.geometry?.y ?? a[N.latField], lon = f.geometry?.x ?? a[N.lonField];
+          if (!lat || !lon) continue;
+          this.nbi.set(H.normNBI(a[N.idField]), { lat, lon, facility: a.FACILITY_CARRIED_007 || '', feature: a.FEATURES_DESC_006A || '', year: a.YEAR_BUILT_027 || '' });
+        }
+        nbiNote = `, ${this.nbi.size.toLocaleString()} NBI bridge locations`;
+      } catch (e) {
+        console.error(e);
+        nbiNote = ` · <span style="color:var(--danger)">NBI layer not loaded: ${H.esc(e.message)}. iTAP-only bridges can still match by HB / IHSSI number.</span>`;
+      }
+      this.setStatus('dataStatus', `✓ Loaded ${this.hb.length.toLocaleString()} Historic Bridges, ${this.sv.length.toLocaleString()} bridge-like County Survey records, ${this.indot.length.toLocaleString()} INDOT bridges${nrNote}${nbiNote} — ${new Date().toLocaleString()}`);
       this.recompute(true);
     } catch (e) {
       console.error(e);
@@ -955,7 +1009,7 @@ const App = {
     }
   },
 
-  // Accepts the CSV worksheet, or an Excel file as-is (e.g. iTAP's SearchResults.xlsx).
+  // Accepts iTAP's Search Results export as-is (.xlsx), or the same saved as CSV.
   // Excel files are read with SheetJS, loaded only when one is picked.
   async loadCsvFile(file) {
     if (!file) return;
@@ -996,10 +1050,12 @@ const App = {
     rows = rows.slice(hRow);
     const head = rows[0].map(h => String(h).replace(/^\uFEFF/, '').trim().toLowerCase());
     const col = (...names) => head.findIndex(h => names.some(n => h === n || h.replace(/[^a-z]/g, '') === n.replace(/[^a-z]/g, '')));
-    // Reads either the worksheet this page produces or iTAP's own Search Results export
+    // Reads iTAP's own Search Results export (or any file with NBI and status columns)
     // saved as CSV ("NBI Number", "Current Status", "Current Status Note").
     const iNbi = col('nbi', 'nbi number', 'nbi_number'), iSt = col('itap status', 'current status', 'status'),
-          iOn = col('checked on', 'date'), iBy = col('checked by'), iNote = col('note', 'notes', 'current status note');
+          iOn = col('checked on', 'date'), iBy = col('checked by'), iNote = col('note', 'notes', 'current status note'),
+          iHb = col('hb number', 'hb'), iIhssi = col('ihssi number', 'ihssi'), iCounty = col('county'), iCountyNo = col('county number'),
+          iRepl = col('replacement bridge nbi number'), iFac = col('facility carried by structure'), iFeat = col('features intersected'), iLoc = col('location');
     if (iNbi < 0 || iSt < 0) {
       const found = head.filter(Boolean).slice(0, 8).map(h => `“${H.esc(h)}”`).join(', ');
       this.setStatus('csvStatus', `${H.esc(sourceName)}: couldn't find ${iNbi < 0 ? 'an NBI column' : ''}${iNbi < 0 && iSt < 0 ? ' or ' : ''}${iSt < 0 ? 'a status column (iTAP Status / Current Status)' : ''}. Columns found: ${found || 'none'}${head.length > 8 ? '…' : ''}`, true);
@@ -1013,15 +1069,19 @@ const App = {
       const st = H.itapStatus(raw);
       if (raw && !st) bad.push(`${r[iNbi]} ("${raw}")`);
       if (!st) continue;
-      map.set(nbi, { status: st, raw, on: iOn >= 0 ? r[iOn] || '' : '', by: iBy >= 0 ? r[iBy] || '' : '', note: iNote >= 0 ? r[iNote] || '' : '' });
+      const get = i => (i >= 0 ? String(r[i] ?? '').trim() : '');
+      map.set(nbi, { status: st, raw, on: get(iOn), by: get(iBy), note: get(iNote),
+        nbiRaw: get(iNbi), hb: get(iHb), ihssi: get(iIhssi), county: get(iCounty), countyNo: get(iCountyNo),
+        replNbi: get(iRepl), facility: get(iFac), feature: get(iFeat), location: get(iLoc) });
     }
     this.itap = map; this.itapSource = sourceName;
     const known = new Set(this.indot.map(b => b.nbiKey));
     const unknown = this.indot.length ? [...map.keys()].filter(k => !known.has(k)) : [];
     const nUnk = [...map.values()].filter(v => v.status === 'unknown').length;
     let msg = `✓ ${H.esc(sourceName)}: ${map.size} bridge${map.size === 1 ? '' : 's'} with an iTAP status${nUnk ? ` (${nUnk} Unknown)` : ''}`;
-    if (unknown.length) msg += ` · ${unknown.length} of them aren't in the Select/Non-Select layers and are ignored`;
+    this.itapOutside = unknown.length;
     if (bad.length) msg += ` · ⚠ ${bad.length} unreadable status value${bad.length === 1 ? '' : 's'} skipped: ${H.esc(bad.slice(0, 3).join('; '))}${bad.length > 3 ? '…' : ''}`;
+    this.itapMsg = msg;
     this.setStatus('csvStatus', msg, false);
     if (this.indot.length) this.recompute(false);
   },
@@ -1029,7 +1089,13 @@ const App = {
   // "New since last run" = issue rows not present the previous time this browser
   // loaded data. Kept in this browser only; purely a convenience.
   recompute(freshLoad) {
-    this.rows = Matcher.build(this.hb, this.sv, this.indot, this.itap, this.nr || []);
+    this.rows = Matcher.build(this.hb, this.sv, this.bridgeList(), this.itap, this.nr || []);
+    if (this.itapMsg) {
+      const st = Matcher.stats, x = this.itapExtra || {};
+      let extra = '';
+      if (st.itapOnly) extra = ` · ${st.itapOnly.toLocaleString()} aren't in the Select/Non-Select layers: ${x.byNbi || 0} placed by their NBI location, ${x.byRepl || 0} by the replacement bridge's, ${x.none || 0} with no location; ${st.itapKept.toLocaleString()} reach a SHAARD record and are shown`;
+      this.setStatus('csvStatus', this.itapMsg + extra, false);
+    }
     this.rows.forEach((r, i) => { r.idx = i; });
     this.selected = null;
     const issues = this.rows.filter(r => r.cat !== 'ok').map(r => r.key);
@@ -1045,6 +1111,29 @@ const App = {
     document.getElementById('btnExport').disabled = false;
     document.getElementById('btnShaard').disabled = false;
     this.render();
+  },
+
+  // INDOT layer bridges (each with its NBI location, when there is one), plus every bridge in
+  // the iTAP file that isn't in those layers, placed with its NBI location or, once replaced,
+  // the replacement bridge's NBI location.
+  bridgeList() {
+    const nbi = this.nbi || new Map(), inLayer = new Set();
+    for (const b of this.indot) { b.nbiPt = nbi.get(b.nbiKey) || null; inLayer.add(b.nbiKey); }
+    const extra = [], x = { byNbi: 0, byRepl: 0, none: 0 };
+    for (const [k, it] of this.itap) {
+      if (inLayer.has(k)) continue;
+      let loc = nbi.get(k), from = loc ? 'NBI' : '';
+      if (!loc && it.replNbi) { loc = nbi.get(H.normNBI(it.replNbi)); if (loc) from = 'replacement'; }
+      x[from === 'NBI' ? 'byNbi' : from ? 'byRepl' : 'none']++;
+      extra.push({
+        kind: 'iTAP only', itapOnly: true, nbi: it.nbiRaw || k, nbiKey: k, countyNo: it.countyNo, county: it.county,
+        linkRaw: [it.hb, it.ihssi].filter(Boolean).join(' / '), link: H.parseLink(it.hb || it.ihssi),
+        lat: loc?.lat ?? null, lon: loc?.lon ?? null, locFrom: from, replNbi: it.replNbi, nbiInfo: loc || null,
+        place: [it.facility, it.feature && 'over ' + it.feature, it.location].filter(Boolean).join(', ')
+      });
+    }
+    this.itapExtra = x;
+    return [...this.indot, ...extra];
   },
 
   setCat(k) { this.activeCat = k; this.render(); },
@@ -1108,13 +1197,16 @@ const App = {
     const q = document.getElementById('search').value.trim().toLowerCase();
     const warnOnly = document.getElementById('warnOnly').checked, newOnly = document.getElementById('newOnly').checked;
     const unreviewedOnly = document.getElementById('unreviewedOnly').checked;
+    const src = document.getElementById('srcFilter').value;
     return this.rows.filter(r => {
       if (this.activeCat !== 'all' && r.cat !== this.activeCat) return false;
       if (warnOnly && !r.warn.length) return false;
       if (unreviewedOnly && (!r.warn.length || Reviews.get(r)?.match)) return false;
       if (newOnly && !r.isNew) return false;
+      if (src === 'layer' && (!r.indot || r.indot.itapOnly)) return false;
+      if (src === 'itap' && !r.indot?.itapOnly) return false;
       if (q) {
-        const hay = [r.indot?.nbi, r.indot?.linkRaw, r.indot?.countyNo, r.hb?.id, r.hb?.name, r.sv?.id, r.sv?.name, r.nr?.id, r.nr?.name].join(' ').toLowerCase();
+        const hay = [r.indot?.nbi, r.indot?.linkRaw, r.indot?.countyNo, r.hb?.id, r.hb?.name, r.sv?.id, r.sv?.name, r.nr?.id, r.nr?.name, r.indot?.place, r.indot?.county].join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -1146,7 +1238,7 @@ const App = {
     let dist = '';
     if (u && b.lat != null) {
       const d = H.dist(b, u), far = d > CONFIG.idMatchFarFeet;
-      dist = `<div class="utm-dist ${far ? 'warn' : 'name'}">${far ? '⚠ ' : ''}iTAP point is ${H.fmtDist(d)} from the INDOT point</div>`;
+      dist = `<div class="utm-dist ${far ? 'warn' : 'name'}">${far ? '⚠ ' : ''}iTAP point is ${H.fmtDist(d)} from the ${b.itapOnly ? 'NBI' : 'INDOT'} point</div>`;
     }
     const label = u ? '📍 Edit UTM' : '📍 Add UTM';
     const coords = u ? `<div class="utm-dist name id">${u.zone} · ${Math.round(u.e)} E · ${Math.round(u.n)} N</div>` : '';
@@ -1192,6 +1284,20 @@ const App = {
       <input type="text"${off} placeholder="Review note" maxlength="500" value="${H.esc(v?.note)}" onchange="App.setReview(${r.idx}, { note: this.value })"></div>`;
   },
 
+  bridgeCell(b) {
+    const lines = [`<div class="id">NBI ${H.esc(b.nbi)}</div>`];
+    if (b.itapOnly) {
+      lines.push(`<div class="name">iTAP only${b.county ? ' · ' + H.esc(b.county) : ''}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>`);
+      if (b.place) lines.push(`<div class="name">${H.esc(b.place)}</div>`);
+      if (b.linkRaw) lines.push(`<div class="name">iTAP: ${H.esc(b.linkRaw)}</div>`);
+      lines.push(`<div class="name">${b.locFrom === 'NBI' ? 'Location: NBI' : b.locFrom ? `Location: replacement bridge NBI ${H.esc(b.replNbi)}` : '<span style="color:var(--warn)">No NBI location</span>'}</div>`);
+    } else {
+      lines.push(`<div class="name">${H.esc(b.kind)}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>`);
+      if (b.linkRaw) lines.push(`<div class="name">On file: ${H.esc(b.linkRaw)}</div>`);
+    }
+    return lines.join('');
+  },
+
   rowHtml(r) {
     const cat = CATEGORIES.find(c => c.key === r.cat);
     const rec = x => x ? `<div class="id">${H.esc(x.id)}</div><div class="name">${H.esc(x.name)}</div>${this.badge(x.status, x.rating || 'No rating')}` : '<span class="muted">—</span>';
@@ -1204,11 +1310,11 @@ const App = {
     if (p && p.lat != null) links.push(`<a href="${H.mapUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Map</a>`, `<a href="${H.svUrl(p.lat, p.lon)}" target="_blank" rel="noopener">Street View</a>`);
     return `<tr data-idx="${r.idx}" onclick="if(!event.target.closest('a,select,input,button'))App.select(${r.idx},'table')">
       <td><div class="issue"><span class="cat-dot" style="background:${cat.color}"></span>${H.esc(cat.title)}${r.isNew ? '<span class="tag-new">NEW</span>' : ''}</div>${r.warn.map(w => `<div class="warn">⚠ ${H.esc(w)}</div>`).join('')}${this.reviewHtml(r)}</td>
-      <td>${b ? `<div class="id">NBI ${H.esc(b.nbi)}</div><div class="name">${H.esc(b.kind)}${b.countyNo ? ' · County #' + H.esc(b.countyNo) : ''}</div>${b.linkRaw ? `<div class="name">On file: ${H.esc(b.linkRaw)}</div>` : ''}` : '<span class="muted">Not in INDOT inventory</span>'}</td>
+      <td>${b ? this.bridgeCell(b) : '<span class="muted">Not in INDOT inventory or iTAP</span>'}</td>
       <td>${rec(r.hb)}</td>
       <td>${rec(r.sv)}</td>
       <td>${rec(r.nr)}</td>
-      <td>${r.itap ? `${this.badge(r.itap.status, r.itap.raw || r.itap.status)}<div class="name">${H.esc([r.itap.on, r.itap.by].filter(Boolean).join(' · '))}</div>${r.itap.note ? `<div class="name">${H.esc(r.itap.note)}</div>` : ''}` : (b ? '<span class="muted">Not checked</span>' : '<span class="muted">—</span>')}${this.utmHtml(r)}</td>
+      <td>${r.itap ? `${this.badge(r.itap.status, r.itap.raw || r.itap.status)}<div class="name">${H.esc([r.itap.on, r.itap.by].filter(Boolean).join(' · '))}</div>${r.itap.note ? `<div class="name">${H.esc(r.itap.note)}</div>` : ''}` : (b ? `<span class="muted">${this.itapSource ? 'Not in the iTAP file' : 'No iTAP file loaded'}</span>` : '<span class="muted">—</span>')}${this.utmHtml(r)}</td>
       <td class="name">${H.esc(r.how.join('; ') || '—')}</td>
       <td class="links">${links.join('')}</td>
     </tr>`;
@@ -1216,7 +1322,7 @@ const App = {
 
   exportIssues() {
     const rows = this.visibleRows();
-    const head = ['Issue', 'New since last run', 'Match warnings', 'Match review', 'Review note', 'NBI', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
+    const head = ['Issue', 'New since last run', 'Match warnings', 'Match review', 'Review note', 'NBI', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record / in iTAP', 'Location from',
       'Historic Bridge ID', 'Historic Bridge name', 'Historic Bridge rating', 'County Survey #', 'County Survey name', 'County Survey rating',
       'NR ID', 'NR name', 'NR status',
       'iTAP status', 'iTAP checked on', 'iTAP checked by', 'iTAP note', 'iTAP UTM zone', 'iTAP UTM easting', 'iTAP UTM northing', 'How matched', 'Latitude', 'Longitude', 'Historic Bridge SHAARD link', 'County Survey SHAARD link'];
@@ -1226,6 +1332,7 @@ const App = {
       return [CATEGORIES.find(c => c.key === r.cat).title, r.isNew ? 'Yes' : '', r.warn.join('; '),
         REVIEW_CHOICES.find(c => c.key === rv?.match)?.label, rv?.note,
         r.indot?.nbi, r.indot?.kind, r.indot?.countyNo, r.indot?.linkRaw,
+        !r.indot ? '' : r.indot.itapOnly ? (r.indot.locFrom === 'NBI' ? 'NBI' : r.indot.locFrom ? 'Replacement bridge NBI ' + r.indot.replNbi : 'None') : 'INDOT layer',
         r.hb?.id, r.hb?.name, r.hb?.rating, r.sv?.id, r.sv?.name, r.sv?.rating, r.nr?.id, r.nr?.name, r.nr?.rating,
         r.itap?.raw, r.itap?.on, r.itap?.by, r.itap?.note, ...((u => [u?.zone, u?.e, u?.n])(Reviews.utmGet(r.indot?.nbiKey))), r.how.join('; '),
         p?.lat?.toFixed(6), p?.lon?.toFixed(6), H.shaardUrl(r.hb?.id), H.shaardUrl(r.sv?.id)];
@@ -1259,24 +1366,6 @@ const App = {
     if (lines.length === 1) { this.setStatus('reviewStatus', `Nothing to export. ${heldText}`); return; }
     H.download(`shaard-status-changes-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
     this.setStatus('reviewStatus', `✓ Exported ${lines.length - 1} SHAARD record${lines.length === 2 ? '' : 's'}. ${heldText}`);
-  },
-
-  // Every INDOT bridge, with what SHAARD says and any iTAP entries already loaded.
-  // This is the file to keep editing: fill iTAP Status, save as CSV, load back in.
-  downloadWorksheet() {
-    const order = { checkShaard: 0, notifyShaard: 1, itapUnknown: 2, verifyItap: 3, disagree: 4, ok: 5 };
-    const rows = this.rows.filter(r => r.indot).sort((a, b) => (order[a.cat] - order[b.cat]) || a.indot.nbi.localeCompare(b.indot.nbi));
-    const head = ['NBI', 'iTAP Status', 'Checked On', 'Checked By', 'Note', 'Inventory', 'County Bridge #', 'HB/IHSSI on INDOT record',
-      'Historic Bridge ID', 'Historic Bridge rating', 'County Survey #', 'County Survey rating', 'NR ID', 'NR status', 'SHAARD says demolished?', 'Latitude', 'Longitude',
-      'iTAP UTM zone', 'iTAP UTM easting', 'iTAP UTM northing'];
-    const lines = [head, ...rows.map(r => {
-      const b = r.indot, it = r.itap;
-      const dem = [r.hb, r.sv, r.nr].some(x => x?.status === 'demolished') ? 'Yes' : '';
-      return [b.nbi, it?.raw || '', it?.on || '', it?.by || '', it?.note || '', b.kind, b.countyNo, b.linkRaw,
-        r.hb?.id, r.hb?.rating, r.sv?.id, r.sv?.rating, r.nr?.id, r.nr?.rating, dem, b.lat?.toFixed(6), b.lon?.toFixed(6),
-        ...((u => [u?.zone, u?.e, u?.n])(Reviews.utmGet(b.nbiKey)))];
-    })].map(l => l.map(H.csvCell).join(','));
-    H.download(`itap_verified.csv`, lines.join('\r\n'));
   }
 };
 
