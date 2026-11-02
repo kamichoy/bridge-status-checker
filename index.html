@@ -118,6 +118,8 @@
   .review-note-bar { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
   .review-note-bar button { font-size: 11px; padding: 2px 9px; border-radius: 4px; border: 1px solid var(--primary); background: var(--primary); color: white; cursor: pointer; }
   .review-note-bar button:disabled { opacity: 0.35; cursor: default; }
+  .review-note-bar button.review-close { background: white; color: var(--text-muted); border-color: #ced4da; }
+  .review-note-bar button.review-close:hover { color: var(--text); border-color: var(--text-muted); }
   .note-state { font-size: 11px; color: var(--text-muted); }
   .note-state.dirty { color: var(--warn); font-weight: 600; }
   .tag-new { display: inline-block; background: var(--primary); color: white; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
@@ -1186,6 +1188,9 @@ const App = {
   setReview(idx, patch) {
     Reviews.save(this.rows[idx], patch);
     document.getElementById('warnSummary').textContent = this.warnSummary();
+    // Rows without a warning: redraw so Close appears / disappears with what's saved.
+    // An unsaved note survives the redraw (it's kept in noteDrafts).
+    if (!this.rows[idx].warn.length) this.redrawRow(idx);
     // Only redraw when the row should drop out of the view; a redraw loses the cursor.
     if (document.getElementById('unreviewedOnly').checked) this.render();
   },
@@ -1311,6 +1316,15 @@ const App = {
   // Unsaved text is kept per row while the page is open, so filtering or re-sorting
   // doesn't throw it away, and leaving the page with unsaved notes asks first.
   noteDrafts: new Map(),
+  // Folds an opened-but-unused review back into the ✎ Review button (rows without a warning
+  // and nothing saved). An unsaved note is discarded only after asking.
+  closeReview(idx) {
+    const r = this.rows[idx], k = Reviews.key(r), draft = this.noteDrafts.get(k);
+    if (draft && draft.trim() && !confirm('Discard the unsaved note for this bridge?')) return;
+    this.noteDrafts.delete(k);
+    this.reviewOpen.delete(k);
+    this.redrawRow(idx);
+  },
   openReview(idx) {
     this.reviewOpen.add(Reviews.key(this.rows[idx]));
     this.redrawRow(idx);
@@ -1323,6 +1337,7 @@ const App = {
     return `<div class="review-note"><textarea id="rvnote-${r.idx}" class="${dirty ? 'dirty' : ''}"${off} rows="2" maxlength="4000" placeholder="Review note"
         oninput="App.noteEdited(${r.idx})" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();App.saveNote(${r.idx})}">${H.esc(text)}</textarea>
       <div class="review-note-bar"><button id="rvsave-${r.idx}"${dirty ? '' : ' disabled'} onclick="App.saveNote(${r.idx})">Save note</button>
+      ${!r.warn.length && !v ? `<button class="review-close" title="Close without saving anything" onclick="App.closeReview(${r.idx})">Close</button>` : ''}
       <span class="note-state${dirty ? ' dirty' : ''}" id="rvstate-${r.idx}">${H.esc(state)}</span></div></div>`;
   },
   noteEdited(idx) {

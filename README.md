@@ -73,7 +73,7 @@ Changing a status in SHAARD does not clear a warning. Warnings come from IDs, co
 
 ## Reviews
 
-Every row can be reviewed, because a bridge can look fine on the map and still have a problem (a relocated bridge, for example, whose records all sit at the new site). Rows with a warning always show the review dropdown and note box; other rows show a small **✎ Review** button that opens them, and stay open once they have a review or a note. **Reviewed or noted only** lists every row with a saved review or note.
+Every row can be reviewed, because a bridge can look fine on the map and still have a problem (a relocated bridge, for example, whose records all sit at the new site). Rows with a warning always show the review dropdown and note box; other rows show a small **✎ Review** button that opens them. If you open one and there's nothing to record, **Close** folds it back (it asks first if you've typed an unsaved note). Once a row has a saved review or note it stays open; set it back to *Not reviewed* and clear the note to make **Close** reappear. **Reviewed or noted only** lists every row with a saved review or note.
 
 The dropdown saves as soon as you change it. The note saves only when you click **Save note** (or press Ctrl+Enter / ⌘+Enter); until then the box is highlighted and marked *Unsaved*. Drag the box's corner to make it bigger. Unsaved notes survive filtering and sorting while the page is open, and the browser asks before you leave the page with unsaved notes.
 
