@@ -1477,13 +1477,20 @@ const App = {
   exportShaard() {
     const layerName = { hb: 'Historic Bridge', sv: 'County Survey', nr: 'National Register' };
     const head = ['SHAARD ID', 'Name', 'Layer', 'Current rating', 'Change to', 'Note', 'iTAP status', 'NBI'];
-    const change = [], seeNote = [], held = { warn: 0, doubt: 0, noTarget: 0 };
+    const change = [], relocated = [], seeNote = [], held = { warn: 0, doubt: 0, noTarget: 0 };
     let nChangeBridges = 0;
     for (const r of this.rows) {
       const rv = Reviews.get(r), note = (rv?.note || '').trim();
-      if (!note && !rv?.checked) continue;
+      const isReloc = rv?.match === 'relocated';
+      if (!note && !rv?.checked && !isReloc) continue;
       const recs = [r.hb, r.sv, r.nr].filter(Boolean);
       if (!recs.length) continue;
+      // One line for the whole bridge: all its SHAARD records, with what to do and the note.
+      const bridgeLine = what => [recs.map(x => x.id).join(' / '), recs.map(x => x.name).join(' / '), recs.map(x => layerName[x.layer]).join(' / '),
+        recs.map(x => x.rating || '—').join(' / '), what, note, r.itap?.raw, r.indot?.nbi];
+      // Relocated bridges get their own line so they can be listed together; whether SHAARD
+      // moves the points is SHAARD's call. Any status change still goes out on its own.
+      if (isReloc) relocated.push(bridgeLine('Relocated (see note)'));
       const t = this.targetStatus(r);
       const wrong = !t ? [] : recs.filter(x => t.status === 'demolished' ? x.status !== 'demolished' : x.status === 'demolished');
       const doubt = ['different', 'unsure'].includes(rv?.match);
@@ -1492,25 +1499,26 @@ const App = {
         nChangeBridges++;
         for (const x of wrong) change.push([x.id, x.name, layerName[x.layer], x.rating,
           t.status === 'demolished' ? 'Demolished' : 'Not demolished (check the rating)', note, r.itap?.raw, r.indot?.nbi]);
+      } else if (isReloc) {
+        // already listed above
       } else if (note) {
-        seeNote.push([recs.map(x => x.id).join(' / '), recs.map(x => x.name).join(' / '), recs.map(x => layerName[x.layer]).join(' / '),
-          recs.map(x => x.rating || '—').join(' / '), 'See note', note, r.itap?.raw, r.indot?.nbi]);
+        seeNote.push(bridgeLine('See note'));
       } else if (wrong.length) {
         held[doubt ? 'doubt' : 'warn']++;
       } else if (!t && recs.some(x => x.status === 'demolished') && recs.some(x => x.status === 'standing')) {
         held.noTarget++;
       }
     }
-    const lines = [head, ...change, ...seeNote];
+    const lines = [head, ...change, ...relocated, ...seeNote];
     const heldBits = [
       held.warn && `${held.warn} with a warning not reviewed as Same bridge / Relocation`,
       held.doubt && `${held.doubt} reviewed Not the same bridge / Unsure`,
       held.noTarget && `${held.noTarget} where the SHAARD records disagree, there's no iTAP status and "Should be" isn't set`
     ].filter(Boolean);
     const heldText = heldBits.length ? ` Not exported (✓ without a note): ${heldBits.join('; ')}.` : '';
-    if (lines.length === 1) { this.setStatus('reviewStatus', `Nothing to export: no bridge with a note, or a ✓ and a status to change.${heldText}`); return; }
+    if (lines.length === 1) { this.setStatus('reviewStatus', `Nothing to export: no bridge with a note, a Relocation review, or a ✓ and a status to change.${heldText}`); return; }
     H.download(`shaard-changes-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
-    this.setStatus('reviewStatus', `✓ Exported ${change.length} record change${change.length === 1 ? '' : 's'} (from ${nChangeBridges} bridge${nChangeBridges === 1 ? '' : 's'}) and ${seeNote.length} "See note" line${seeNote.length === 1 ? '' : 's'}.${heldText}`);
+    this.setStatus('reviewStatus', `✓ Exported ${change.length} record change${change.length === 1 ? '' : 's'} (from ${nChangeBridges} bridge${nChangeBridges === 1 ? '' : 's'}), ${relocated.length} relocated bridge${relocated.length === 1 ? '' : 's'} and ${seeNote.length} "See note" line${seeNote.length === 1 ? '' : 's'}.${heldText}`);
   }
 };
 
