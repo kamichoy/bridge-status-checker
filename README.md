@@ -12,19 +12,20 @@ Finds Indiana bridges whose demolished or standing status disagrees across data 
 | County Survey (SHAARD) | Rating, name, location, for bridge-like records only | Read from the state GIS service |
 | INDOT Select and Non-Select Bridges | NBI number, county bridge number, linked HB or IHSSI ID, location | Read from the state GIS service |
 | National Register sites (SHAARD) | NR ID, name, listed / delisted status, location, for bridge-like names only | Read from the state GIS service |
-| iTAP | Whether the bridge is confirmed extant or gone | A CSV or Excel file you load into the page |
+| National Bridge Inventory (FHWA NTAD) | Location of every Indiana bridge by NBI number (`STATE_CODE_001` starting `18`) | Read from the FHWA ArcGIS service |
+| iTAP | Whether the bridge is extant or gone, plus its HB / IHSSI numbers and replacement bridge NBI | iTAP's Search Results export (`.xlsx` or CSV), loaded into the page |
 
 The GIS data loads each time the page opens. Those layers are read-only published copies, so a change made in SHAARD appears here only after the layer is republished. The page cannot tell you when that will happen.
 
 ## Using the page
 
 1. Open the page and wait 10–30 seconds for the GIS data to load.
-2. Load your iTAP file. This can be the worksheet from **Download iTAP worksheet**, or iTAP's own Search Results export (`.xlsx`).
+2. Load iTAP's Search Results export (`.xlsx`, or the same saved as CSV).
 3. Pick an issue card in **Results**, then use the filters, table and map to inspect the rows.
 4. Review any rows with a match warning (⚠).
 5. Click **Export for SHAARD** to get the list to send to SHAARD staff.
 
-Click a table row or map dot to see that bridge's records on the map: **I** for INDOT, **H** for Historic Bridge, **S** for County Survey, **N** for National Register and **T** for an iTAP UTM location you entered, with the distances between them.
+Click a table row or map dot to see that bridge's records on the map: **I** for the INDOT layer, **B** for the NBI location, **H** for Historic Bridge, **S** for County Survey, **N** for National Register and **T** for an iTAP UTM location you entered, with the distances between them.
 
 ## Issue categories
 
@@ -36,15 +37,15 @@ Each row goes into the first category it fits.
 | iTAP: standing, SHAARD says demolished | iTAP says the bridge is there, but a SHAARD record rates it Demolished | One of them is wrong, so ask SHAARD staff to check |
 | iTAP: status unknown | The bridge is in iTAP, but its status there is Unknown | Check iTAP notes, imagery or the county |
 | SHAARD layers disagree | The Historic Bridge, County Survey and NR records differ and iTAP has not been checked | Check the bridge in iTAP |
-| Verify in iTAP | Still in the INDOT inventory, but SHAARD says demolished | Look it up in iTAP and record the result |
 | Consistent | Every source with an answer agrees | None |
 
 ## How records are matched
 
 1. **By ID:** an INDOT bridge links to a Historic Bridge or County Survey record through the HB or IHSSI ID on its record.
 2. **Historic Bridge to County Survey:** these layers share no ID, so they pair only when each is the other's closest candidate within 656 ft.
-3. **By distance from INDOT:** an INDOT bridge with no usable ID takes the closest record within 656 ft.
-4. **National Register:** NR sites share no ID with the other layers. An NR bridge first pairs **by name** with a Historic Bridge or County Survey record up to 3 mi away (closest wins), so an NR point in the wrong place still finds its bridge. Names count as the same when they match after dropping "No."/"Number", "#" and filler words and expanding St/Rd/Ave/Cr, or when one is a subset of the other with at least two real words in common. Otherwise it pairs **by distance**, within 656 ft. A Historic Bridge or Survey record that isn't in any other row gets one when an NR record matches it, and an NR bridge that matches nothing gets a row of its own.
+3. **By distance:** a bridge with no usable ID takes the closest Historic Bridge and Survey records within 656 ft that no ID link has already claimed.
+4. **iTAP-only bridges:** every bridge in the iTAP file that isn't in the Select/Non-Select layers is placed with its NBI location, or, when it has been replaced and dropped from the NBI, with the location of its *Replacement Bridge NBI Number*. It links to SHAARD through the HB / IHSSI numbers in iTAP, then by distance as above. iTAP-only bridges that reach no SHAARD record (and raise no warning) are left out; the iTAP load message says how many were placed and how many are shown. Use the **iTAP only (placed by NBI)** filter to see just these.
+5. **National Register:** NR sites share no ID with the other layers. An NR bridge first pairs **by name** with a Historic Bridge or County Survey record up to 3 mi away (closest wins), so an NR point in the wrong place still finds its bridge. Names count as the same when they match after dropping "No."/"Number", "#" and filler words and expanding St/Rd/Ave/Cr, or when one is a subset of the other with at least two real words in common. Otherwise it pairs **by distance**, within 656 ft. A Historic Bridge or Survey record that isn't in any other row gets one when an NR record matches it, and an NR bridge that matches nothing gets a row of its own.
 
 A listed NR record counts as standing; one whose status says delisted, demolished or removed counts as demolished. The NR layer's ID, name and status fields are found automatically, and the load message shows which ones were used. If the layer renames them, set `idField`, `nameField` and `statusField` under `CONFIG.layers.nrSites`.
 
@@ -62,6 +63,9 @@ A warning means the records may not describe the same bridge.
 | `Numbers in the two names don't match` | Two nearby bridges were paired | Compare the names, county bridge numbers, roads and streams |
 | `NR-xxxx (NR) is 2.1 mi from the nearest other record` (over 1,640 ft) | The NR point is misplaced, or two bridges with the same name were paired | Compare the **N** pin with the others on the Imagery basemap and check the NR nomination's location |
 | `Numbers in the NR name don't match` | The NR record was paired with a different numbered bridge | Compare the NR name with the Historic Bridge or Survey name |
+| `The NBI location is 2.1 mi from the INDOT point` (over 1,640 ft) | The INDOT layer point or the NBI coordinate is misplaced | Compare the **I** and **B** pins on the Imagery basemap |
+| `HB-xxxx (from iTAP) is not in the Historic Bridges layer` | iTAP has a wrong or retired HB number | Search for the ID in SHAARD |
+| `X is 900 ft from the NBI point` / `… replacement bridge NBI point` | Only for iTAP-only bridges: the ID link and the NBI location disagree. A replacement bridge can sit a little off the old alignment, so a few hundred feet there is normal | Compare the pins; enter iTAP's UTM if unsure |
 
 The **Map** and **Street View** links open only one point, so use the page's map to compare the records.
 
@@ -98,7 +102,7 @@ Every INDOT bridge that has an iTAP record shows a **📍 Add UTM** button in it
 
 Entries outside Indiana, or numbers that aren't UTM meters, are rejected with a message. **📍 Edit UTM** changes or removes a saved location.
 
-UTM locations are stored with the reviews (same access token, same storage, under `utm:<NBI>`), so they are shared by everyone using the page and stay attached to the bridge even if its matches or category change. Only the zone, easting and northing are stored. They also appear in **Export shown rows** and the **iTAP worksheet**, but are not read back from a loaded file.
+UTM locations are stored with the reviews (same access token, same storage, under `utm:<NBI>`), so they are shared by everyone using the page and stay attached to the bridge even if its matches or category change. Only the zone, easting and northing are stored. They also appear in **Export shown rows**.
 
 ## Exports
 
@@ -106,7 +110,6 @@ UTM locations are stored with the reviews (same access token, same storage, unde
 |---|---|
 | **Export shown rows (CSV)** | Every row in the current view, including warnings and reviews |
 | **Export for SHAARD** | One line per SHAARD record that needs action |
-| **Download iTAP worksheet** | Every INDOT bridge, for recording iTAP results in Excel |
 
 **Export for SHAARD** includes only the two iTAP conflict categories:
 
@@ -114,8 +117,6 @@ UTM locations are stored with the reviews (same access token, same storage, unde
 - `iTAP: standing, SHAARD says demolished` exports as *Check the Demolished rating*.
 
 A row with a warning is left out until it is reviewed as **Same bridge**, so a bad match can't get the wrong record changed. Rows without warnings are included directly.
-
-In the iTAP worksheet, a row's note is kept only if its **iTAP Status** is filled in. Only the NBI, iTAP Status, Checked On, Checked By and Note columns are read.
 
 ## Project structure
 
