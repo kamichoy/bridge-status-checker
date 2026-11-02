@@ -98,6 +98,7 @@
   .issue-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
   .warn { color: var(--warn); font-size: 11.5px; margin-top: 3px; }
   .review { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; align-items: center; }
+  .review select.target { max-width: 170px; }
   .check-btn { font-size: 11.5px; font-weight: 700; padding: 2px 8px; border: 1.5px solid #ced4da; border-radius: 12px; background: white; color: #9aa4b1; cursor: pointer; white-space: nowrap; }
   .check-btn:hover:not(:disabled) { border-color: var(--standing); color: var(--standing); }
   .check-btn.on { background: var(--standing); border-color: var(--standing); color: white; }
@@ -598,7 +599,7 @@ const Reviews = {
   // Saves run one at a time, each sending the latest data, so the last change always wins.
   save(r, patch) {
     const k = this.key(r), rec = { ...this.data[k], ...patch, on: H.today() };
-    if (rec.match || rec.note || rec.checked) this.data[k] = rec; else delete this.data[k];
+    if (rec.match || rec.note || rec.checked || rec.target) this.data[k] = rec; else delete this.data[k];
     this.persist('the review');
   },
   persist(what) {
@@ -1309,7 +1310,7 @@ const App = {
   reviewOpen: new Set(),
   reviewHtml(r) {
     const v = Reviews.get(r), off = Reviews.ready ? '' : ' disabled';
-    const k = Reviews.key(r), hasContent = !!(v?.match || v?.note);
+    const k = Reviews.key(r), hasContent = !!(v?.match || v?.note || v?.target);
     const check = this.checkHtml(r, v, off);
     if (!r.warn.length && !hasContent && !this.noteDrafts.has(k) && !this.reviewOpen.has(k)) {
       const title = Reviews.ready ? 'Add a review or note for this bridge' : 'Enter the review access token to add reviews';
@@ -1317,7 +1318,29 @@ const App = {
     }
     const opts = REVIEW_CHOICES.map(c => `<option value="${c.key}"${(v?.match || '') === c.key ? ' selected' : ''}>${H.esc(c.label)}</option>`).join('');
     return `<div class="review">${check}<select${off} onchange="App.setReview(${r.idx}, { match: this.value })">${opts}</select>
-      ${this.noteHtml(r, v, off)}</div>`;
+      ${this.targetHtml(r, v, off)}${this.noteHtml(r, v, off)}</div>`;
+  },
+
+  // What the SHAARD records should say. iTAP decides when it has an answer; otherwise
+  // (no iTAP record, or iTAP Unknown) the reviewer picks it here.
+  targetStatus(r) {
+    const it = r.itap?.status;
+    if (it === 'demolished' || it === 'standing') return { status: it, from: 'iTAP' };
+    const t = Reviews.get(r)?.target;
+    return t ? { status: t, from: 'review' } : null;
+  },
+  targetHtml(r, v, off) {
+    const it = r.itap?.status;
+    if (it === 'demolished' || it === 'standing') return '';
+    // Only where it decides something: the SHAARD records disagree, or iTAP says Unknown
+    // (or a choice was already saved).
+    const recs = [r.hb, r.sv, r.nr].filter(Boolean);
+    const split = recs.some(x => x.status === 'demolished') && recs.some(x => x.status === 'standing');
+    if (!recs.length || (!split && it !== 'unknown' && !v?.target)) return '';
+    const t = v?.target || '';
+    const o = (val, label) => `<option value="${val}"${t === val ? ' selected' : ''}>${label}</option>`;
+    return `<select class="target"${off} title="No iTAP status for this bridge: what should SHAARD say?" onchange="App.setReview(${r.idx}, { target: this.value })">
+      ${o('', 'Should be…')}${o('demolished', 'Should be: Demolished')}${o('standing', 'Should be: Standing')}</select>`;
   },
 
   // ✓ = "I've looked at this one." A quick mark for simple cases; shared like reviews.
@@ -1359,7 +1382,7 @@ const App = {
     return `<div class="review-note"><textarea id="rvnote-${r.idx}" class="${dirty ? 'dirty' : ''}"${off} rows="2" maxlength="4000" placeholder="Review note"
         oninput="App.noteEdited(${r.idx})" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();App.saveNote(${r.idx})}">${H.esc(text)}</textarea>
       <div class="review-note-bar"><button id="rvsave-${r.idx}"${dirty ? '' : ' disabled'} onclick="App.saveNote(${r.idx})">Save note</button>
-      ${!r.warn.length && !(v?.match || v?.note) ? `<button class="review-close" title="Close without saving anything" onclick="App.closeReview(${r.idx})">Close</button>` : ''}
+      ${!r.warn.length && !(v?.match || v?.note || v?.target) ? `<button class="review-close" title="Close without saving anything" onclick="App.closeReview(${r.idx})">Close</button>` : ''}
       <span class="note-state${dirty ? ' dirty' : ''}" id="rvstate-${r.idx}">${H.esc(state)}</span></div></div>`;
   },
   noteEdited(idx) {
@@ -1442,40 +1465,51 @@ const App = {
 
   // One line per SHAARD record to act on. A row with a match warning goes out only once
   // it is reviewed as the same bridge, so a bad match can't get the wrong record changed.
-  // What goes to SHAARD staff, one line per bridge:
-  //  · every bridge with a review note, whatever its category (the note says what's wrong);
-  //  · bridges in the two iTAP-conflict categories that are ✓ checked, even without a note
-  //    (a plain status correction). These are held back when the match is in doubt: a
-  //    warning not reviewed as Same bridge / Relocation, or a review of Not the same bridge / Unsure.
+  // What goes to SHAARD staff: one line per SHAARD record to change ("Change to"), with the
+  // reviewer's note as the evidence. Review choices and ✓ only decide what goes out:
+  //  · a bridge goes out once it has a note or a ✓;
+  //  · its records that disagree with the target status (iTAP, or "Should be" when there's no
+  //    iTAP answer) become "Change to" lines, provided the match isn't in doubt — no warning left
+  //    unconfirmed (Same bridge / Relocation) and no Not the same bridge / Unsure;
+  //  · a bridge with a note but no such change (a location problem, a case still in doubt…)
+  //    goes out as one "See note" line listing all its SHAARD records.
   exportShaard() {
-    const conflict = new Set(['notifyShaard', 'checkShaard']);
-    const order = Object.fromEntries(CATEGORIES.map((c, i) => [c.key, i]));
-    const rec = x => x ? [x.id, x.name, x.rating].filter(Boolean).join(' · ') : '';
-    const head = ['Issue', 'NBI', 'Historic Bridge', 'County Survey', 'National Register', 'iTAP status', 'iTAP note', 'Review', 'Review note', 'Checked'];
-    const out = [], held = { warn: 0, doubt: 0 };
-    let nNote = 0, nCheck = 0;
+    const layerName = { hb: 'Historic Bridge', sv: 'County Survey', nr: 'National Register' };
+    const head = ['SHAARD ID', 'Name', 'Layer', 'Current rating', 'Change to', 'Note', 'iTAP status', 'NBI'];
+    const change = [], seeNote = [], held = { warn: 0, doubt: 0, noTarget: 0 };
+    let nChangeBridges = 0;
     for (const r of this.rows) {
       const rv = Reviews.get(r), note = (rv?.note || '').trim();
-      let take = false;
-      if (note) { take = true; nNote++; }
-      else if (conflict.has(r.cat) && rv?.checked) {
-        if (['different', 'unsure'].includes(rv.match)) held.doubt++;
-        else if (r.warn.length && !['same', 'relocated'].includes(rv.match)) held.warn++;
-        else { take = true; nCheck++; }
+      if (!note && !rv?.checked) continue;
+      const recs = [r.hb, r.sv, r.nr].filter(Boolean);
+      if (!recs.length) continue;
+      const t = this.targetStatus(r);
+      const wrong = !t ? [] : recs.filter(x => t.status === 'demolished' ? x.status !== 'demolished' : x.status === 'demolished');
+      const doubt = ['different', 'unsure'].includes(rv?.match);
+      const unconfirmed = r.warn.length && !['same', 'relocated'].includes(rv?.match);
+      if (wrong.length && !doubt && !unconfirmed) {
+        nChangeBridges++;
+        for (const x of wrong) change.push([x.id, x.name, layerName[x.layer], x.rating,
+          t.status === 'demolished' ? 'Demolished' : 'Not demolished (check the rating)', note, r.itap?.raw, r.indot?.nbi]);
+      } else if (note) {
+        seeNote.push([recs.map(x => x.id).join(' / '), recs.map(x => x.name).join(' / '), recs.map(x => layerName[x.layer]).join(' / '),
+          recs.map(x => x.rating || '—').join(' / '), 'See note', note, r.itap?.raw, r.indot?.nbi]);
+      } else if (wrong.length) {
+        held[doubt ? 'doubt' : 'warn']++;
+      } else if (!t && recs.some(x => x.status === 'demolished') && recs.some(x => x.status === 'standing')) {
+        held.noTarget++;
       }
-      if (take) out.push(r);
     }
-    out.sort((a, b) => (order[a.cat] - order[b.cat]) || String(a.indot?.nbi || a.hb?.id || '').localeCompare(String(b.indot?.nbi || b.hb?.id || '')));
-    const lines = [head, ...out.map(r => {
-      const rv = Reviews.get(r);
-      return [CATEGORIES.find(c => c.key === r.cat).title, r.indot?.nbi, rec(r.hb), rec(r.sv), rec(r.nr), r.itap?.raw, r.itap?.note,
-        rv?.match ? REVIEW_CHOICES.find(c => c.key === rv.match)?.label : '', rv?.note, rv?.checked ? (rv.checkedOn || 'Yes') : ''];
-    })];
-    const heldN = held.warn + held.doubt;
-    const heldText = heldN ? ` Held back ${heldN} ✓ bridge${heldN === 1 ? '' : 's'} without a note: ${[held.warn && `${held.warn} with a warning not reviewed as Same bridge / Relocation`, held.doubt && `${held.doubt} reviewed Not the same bridge / Unsure`].filter(Boolean).join(', ')}.` : '';
-    if (!out.length) { this.setStatus('reviewStatus', `Nothing to export: no bridge has a review note, and no bridge in the two iTAP-conflict categories is ✓ checked.${heldText}`); return; }
-    H.download(`shaard-review-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
-    this.setStatus('reviewStatus', `✓ Exported ${out.length} bridge${out.length === 1 ? '' : 's'}: ${nNote} with a review note, ${nCheck} ✓ status correction${nCheck === 1 ? '' : 's'} without a note.${heldText}`);
+    const lines = [head, ...change, ...seeNote];
+    const heldBits = [
+      held.warn && `${held.warn} with a warning not reviewed as Same bridge / Relocation`,
+      held.doubt && `${held.doubt} reviewed Not the same bridge / Unsure`,
+      held.noTarget && `${held.noTarget} where the SHAARD records disagree, there's no iTAP status and "Should be" isn't set`
+    ].filter(Boolean);
+    const heldText = heldBits.length ? ` Not exported (✓ without a note): ${heldBits.join('; ')}.` : '';
+    if (lines.length === 1) { this.setStatus('reviewStatus', `Nothing to export: no bridge with a note, or a ✓ and a status to change.${heldText}`); return; }
+    H.download(`shaard-changes-${H.today()}.csv`, lines.map(l => l.map(H.csvCell).join(',')).join('\r\n'));
+    this.setStatus('reviewStatus', `✓ Exported ${change.length} record change${change.length === 1 ? '' : 's'} (from ${nChangeBridges} bridge${nChangeBridges === 1 ? '' : 's'}) and ${seeNote.length} "See note" line${seeNote.length === 1 ? '' : 's'}.${heldText}`);
   }
 };
 
