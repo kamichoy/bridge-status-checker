@@ -114,7 +114,7 @@ UTM locations are stored with the reviews (same access token, same storage, unde
 | Button | Contents |
 |---|---|
 | **Export shown rows (CSV)** | Every row in the current view, including warnings and reviews |
-| **Export for SHAARD** | One line per SHAARD record to change (with your note), plus *See note* lines |
+| **Export for SHAARD** | One line per SHAARD record to change (with your note), then *Relocated* and *See note* lines |
 
 **Export for SHAARD** is the list for SHAARD staff: which record to change, to what, and your note as the evidence.
 
@@ -123,7 +123,8 @@ UTM locations are stored with the reviews (same access token, same storage, unde
 - A bridge goes out once it has a **review note** or a **✓**.
 - Each of its SHAARD records that disagrees with what the bridge *should* be becomes a **Change to** line (*Demolished*, or *Not demolished (check the rating)*). What it should be comes from iTAP; when iTAP has no answer (not in the file, or Unknown) and the SHAARD records disagree, choose it with the **Should be** dropdown. On those rows it sits right next to ✓, so a simple case is *pick Should be, then ✓*, without opening the review. Records that are already right are left out.
 - These lines go out only when the match isn't in doubt: no warning left without **Same bridge** / **Relocation**, and no **Not the same bridge** / **Unsure**.
-- A bridge with a note but no such change (a location problem, a case still in doubt, no *Should be* chosen) goes out as one **See note** line listing all its SHAARD records.
+- A bridge reviewed as **Relocation** goes out as one **Relocated (see note)** line listing all its SHAARD records, with or without a note or ✓, so relocated bridges can be listed together while SHAARD decides whether to move the points. *Should be* isn't needed for these; if one is set, its status changes still go out as their own lines.
+- Any other bridge with a note but no such change (a location problem, a case still in doubt, no *Should be* chosen) goes out as one **See note** line listing all its SHAARD records.
 - The review choice and ✓ themselves aren't in the file; they only decide what goes in. The message after exporting gives the counts and anything left out.
 
 ## Project structure
